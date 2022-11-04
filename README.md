@@ -5,8 +5,6 @@ A port of my [Gameboy Emulator](https://github.com/Sl3dge78/gb_emu) to Jai
 # Usage
 Pass the rom you want to open as a cmdline argument
 
-
-
 ## Input
 - A : S
 - B : A
@@ -21,3 +19,6 @@ Pass the rom you want to open as a cmdline argument
 - Space/F9 : Toggle execution
 
 
+# Screenshots
+![1](screenshots/pokemon_blue.png)
+![2](screenshots/zelda.png)
