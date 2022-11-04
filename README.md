@@ -1,4 +1,4 @@
-# GB_Jai
+# JaiBoy
 
 A port of my [Gameboy Emulator](https://github.com/Sl3dge78/gb_emu) to Jai
 
