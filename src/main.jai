@@ -18,25 +18,7 @@ Vector2i :: struct {
     y : s32;
 }
 
-get_display_pos :: (window: *SDL_Window, size: int) -> Vector2, Vector2{
-    w: s32;
-    h: s32;
-    SDL_GetWindowSize(window, *w, *h);
 
-    p0 : Vector2;
-    p0.x = 0;
-    p0.y = xx (h - (SCREEN_HEIGHT * size));
-    p1 : Vector2;
-    p1.x = xx (SCREEN_WIDTH * size);
-    p1.y = xx h;
-
-    // Resize window if smaller or the same size as the gb screen
-    if w < SCREEN_WIDTH * size || h < SCREEN_HEIGHT * size || (w % SCREEN_WIDTH == 0 && h % SCREEN_HEIGHT == 0) {
-        SDL_SetWindowSize(window, xx (SCREEN_WIDTH * size), xx(SCREEN_HEIGHT * size));
-        Simp.update_window(window);
-    }
-    return p0, p1;
-}
 
 main :: () {
 
@@ -108,12 +90,6 @@ main :: () {
                         case SDL_SCANCODE_SPACE; #through; 
                         case SDL_SCANCODE_F9; 
                             gb.step_through = !gb.step_through; 
-                        
-                        // Step Out
-                        case SDL_SCANCODE_F8;
-                            gb.step_out = true;
-                            gb.depth = 0;
-                            gb.step_through = !gb.step_through; 
 
                         // Trace
                         case SDL_SCANCODE_F7; #through;
@@ -136,18 +112,19 @@ main :: () {
                 }
             }
         }
-        
-        ImGui_ImplSdl_NewFrame(window);
-        ImGui.NewFrame();        
 
         loop(gb, delta_time);
         Simp.clear_render_target(0.2, 0.2, 0.2, 1);
+
         copy_lcd_to_texture(gb, gb_texture);
-        
         Simp.set_shader_for_images(gb_texture);
         Simp.immediate_begin();
         p0, p1 := get_display_pos(window, display_size);
         Simp.immediate_quad(p0.x, p0.y, p1.x, p1.y, make_vector4(1, 1, 1, 1));
+        Simp.immediate_flush();
+
+        ImGui_ImplSdl_NewFrame(window);
+        ImGui.NewFrame();
 
         if show_debug then draw_debug(gb);
 
@@ -161,6 +138,26 @@ main :: () {
             frame_time = SDL_GetPerformanceCounter() - frame_start;
         }        
     }
+}
+
+get_display_pos :: (window: *SDL_Window, size: int) -> Vector2, Vector2{
+    w: s32;
+    h: s32;
+    SDL_GetWindowSize(window, *w, *h);
+
+    p0 : Vector2;
+    p0.x = 0;
+    p0.y = xx (h - (SCREEN_HEIGHT * size));
+    p1 : Vector2;
+    p1.x = xx (SCREEN_WIDTH * size);
+    p1.y = xx h;
+
+    // Resize window if smaller or the same size as the gb screen
+    if w < SCREEN_WIDTH * size || h < SCREEN_HEIGHT * size || (w % SCREEN_WIDTH == 0 && h % SCREEN_HEIGHT == 0) {
+        SDL_SetWindowSize(window, xx (SCREEN_WIDTH * size), xx(SCREEN_HEIGHT * size));
+        Simp.update_window(window);
+    }
+    return p0, p1;
 }
 
 copy_lcd_to_texture :: (gb: *Gameboy, texture: Simp.Texture) {

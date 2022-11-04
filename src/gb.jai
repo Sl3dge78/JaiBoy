@@ -106,6 +106,10 @@ Gameboy :: struct {
    
     apu : APU;
 
+    lcd_screen: [SCREEN_HEIGHT][SCREEN_WIDTH]u8;
+
+    halted: bool;
+
     // Internals
     rom_loaded: bool;
     
@@ -119,17 +123,8 @@ Gameboy :: struct {
     running: bool = true;
     step_through: bool = false;
     
-    lcd_screen: [SCREEN_HEIGHT][SCREEN_WIDTH]u8;
-    
-    last_write: u16;
-    last_read: u16;
     clock_mul: float = 1;
 
-    step_out := false;
-    depth := 0;
-
-    halted: bool;
-    
     call_stack: [..]Stack_Entry;
 }
 
@@ -305,7 +300,6 @@ read :: (gb: *Gameboy, address: u16) -> u8 {
     return gb.mem[address];
 }
 
-// @refactor: Only pass the mem here
 read_u16 :: (gb: *Gameboy, addr : u16) -> u16 {
     lo : u16 = read(gb, addr);
     hi : u16 = read(gb, addr + 1);
