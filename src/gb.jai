@@ -129,14 +129,14 @@ Gameboy :: struct {
 }
 
 init :: (using gb: *Gameboy) {       
-    mem.data = Basic.alloc(MEM_SIZE);
+    mem.data = alloc(MEM_SIZE);
     mem.count = MEM_SIZE;
 
     init_audio(gb, *gb.apu);
 }
 
 destroy :: (gb: *Gameboy) {
-    Basic.free(gb.mem.data);
+    free(gb.mem.data);
     Rom.destroy(*gb.rom);
 }
 
@@ -193,12 +193,16 @@ write :: (gb: *Gameboy, address: u16, value: u8) {
         }
         case IO_SC; {
             if value == 0x81 {
-                Basic.print_character(gb.mem[IO_SB]);
+                print_character(gb.mem[IO_SB]);
             }
         }
         case IO_NR52; {
             toggle : bool = !((value >> 7) & 1);
-            SDL_PauseAudioDevice(gb.apu.audio_device, xx toggle);
+            if toggle {
+                SDL_PauseAudioStreamDevice(gb.apu.stream);
+            } else {
+                SDL_ResumeAudioStreamDevice(gb.apu.stream);
+            }
             value &= 0x80;
         }
         case IO_NR11; {
@@ -307,27 +311,27 @@ read_u16 :: (gb: *Gameboy, addr : u16) -> u16 {
 }
 
 input :: (gb: *Gameboy, e: *SDL_KeyboardEvent, is_up: u8) {
-    if e.keysym.scancode == {
-        case SDL_SCANCODE_DOWN;   gb.keys_dpad = (gb.keys_dpad & (0b11110111)) | (is_up << 3);
-        case SDL_SCANCODE_UP;     gb.keys_dpad = (gb.keys_dpad & (0b11111011)) | (is_up << 2);
-        case SDL_SCANCODE_LEFT;   gb.keys_dpad = (gb.keys_dpad & (0b11111101)) | (is_up << 1);
-        case SDL_SCANCODE_RIGHT;  gb.keys_dpad = (gb.keys_dpad & (0b11111110)) | (is_up << 0);
-        case SDL_SCANCODE_X;      gb.keys_buttons = (gb.keys_buttons & (0b11110111)) | (is_up << 3);
-        case SDL_SCANCODE_Z;      gb.keys_buttons = (gb.keys_buttons & (0b11111011)) | (is_up << 2);
-        case SDL_SCANCODE_A;      gb.keys_buttons = (gb.keys_buttons & (0b11111101)) | (is_up << 1);
-        case SDL_SCANCODE_S;      gb.keys_buttons = (gb.keys_buttons & (0b11111110)) | (is_up << 0); 
+    if e.scancode == {
+        case .DOWN;   gb.keys_dpad = (gb.keys_dpad & (0b11110111)) | (is_up << 3);
+        case .UP;     gb.keys_dpad = (gb.keys_dpad & (0b11111011)) | (is_up << 2);
+        case .LEFT;   gb.keys_dpad = (gb.keys_dpad & (0b11111101)) | (is_up << 1);
+        case .RIGHT;  gb.keys_dpad = (gb.keys_dpad & (0b11111110)) | (is_up << 0);
+        case .X;      gb.keys_buttons = (gb.keys_buttons & (0b11110111)) | (is_up << 3);
+        case .Z;      gb.keys_buttons = (gb.keys_buttons & (0b11111011)) | (is_up << 2);
+        case .A;      gb.keys_buttons = (gb.keys_buttons & (0b11111101)) | (is_up << 1);
+        case .S;      gb.keys_buttons = (gb.keys_buttons & (0b11111110)) | (is_up << 0); 
     }
     
     if !is_up {
-        if e.keysym.scancode == {
-            case SDL_SCANCODE_DOWN;   #through;
-            case SDL_SCANCODE_UP;     #through;
-            case SDL_SCANCODE_LEFT;   #through;
-            case SDL_SCANCODE_RIGHT;  #through;
-            case SDL_SCANCODE_X;      #through;
-            case SDL_SCANCODE_Z;      #through;
-            case SDL_SCANCODE_A;      #through;
-            case SDL_SCANCODE_S;      interrupt(gb, .JOYPAD);
+        if e.scancode == {
+            case .DOWN;   #through;
+            case .UP;     #through;
+            case .LEFT;   #through;
+            case .RIGHT;  #through;
+            case .X;      #through;
+            case .Z;      #through;
+            case .A;      #through;
+            case .S;      interrupt(gb, .JOYPAD);
         }
     }
 }
@@ -347,7 +351,7 @@ loop :: (gb: *Gameboy, delta_time: float) {
                 execute(gb);
 
             if gb.call_stack.count > 20 {
-                Basic.array_ordered_remove_by_index(*gb.call_stack, 0);
+                array_ordered_remove_by_index(*gb.call_stack, 0);
             }
             for breakpoints {
                 if gb.pc == it {

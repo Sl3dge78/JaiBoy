@@ -20,13 +20,14 @@ Color :: struct {
     r: u8;
     g: u8;
     b: u8;
+    a: u8;
 } #no_padding;
 
 palette : [4]Color = .[
-    .{0xE0, 0xF8, 0xD0},
-    .{0x88, 0xC0, 0x70},
-    .{0x34, 0x68, 0x56},
-    .{0x08, 0x18, 0x20},
+    .{0xe2, 0xf3, 0xe4, 0xFF},
+    .{0x94, 0xe3, 0x44, 0xFF},
+    .{0x46, 0x87, 0x8f, 0xFF},
+    .{0x33, 0x2c, 0x50, 0xFF},
 ];
 
 Palette :: union  {
@@ -222,7 +223,7 @@ window :: (gb: *Gameboy, LCDC: Lcdc_Flags, LY: u8) {
 get_OAM_sprite:: (gb: *Gameboy, tile_id: u16) -> OAMSprite {
     result : OAMSprite;
     if(tile_id > 40) {
-        Basic.log("Attempting to access tile No %. This is out of the bounds of the OAM", tile_id);
+        log("Attempting to access tile No %. This is out of the bounds of the OAM", tile_id);
     }
     result.y     = read(gb, 0xFE00 + (tile_id * 4));
     result.x     = read(gb, 0xFE00 + (tile_id * 4) + 1);

@@ -55,7 +55,7 @@ get_rom_type :: (id : u8) -> Rom_Type {
         case 0x1D; #through;
         case 0x1E; return .MBC5;
         case; { 
-            Basic.log_error("Cartidge type % is not supported. Some things might not work.", hex(id));
+            log_error("Cartidge type % is not supported. Some things might not work.", hex(id));
             return .NONE;
         }
     }
@@ -89,10 +89,10 @@ Rom :: struct {
 
     get_save_path :: (rom_path: string) -> string {
         path := String.path_strip_extension(rom_path);
-        builder : Basic.String_Builder;
-        Basic.append(*builder, path);
-        Basic.append(*builder, ".sav");
-        return Basic.builder_to_string(*builder, Basic.temp);
+        builder : String_Builder;
+        append(*builder, path);
+        append(*builder, ".sav");
+        return builder_to_string(*builder,, temp);
     }
 
     load_save :: (rom: *Rom) -> bool {
@@ -101,13 +101,13 @@ Rom :: struct {
         if !File_Utilities.file_exists(save_path) then return false;
 
         save, success := File.read_entire_file(save_path);
-        defer Basic.free(save);
+        defer free(save);
         if !success {
-            Basic.log_error("Unable to read save file at %.", save_path);
+            log_error("Unable to read save file at %.", save_path);
             return false;
         }
         if save.count != rom.ram_data.count {
-            Basic.log_error("Saved data isn't the same size as the allocated ram.");
+            log_error("Saved data isn't the same size as the allocated ram.");
             return false;
         }
 
@@ -118,7 +118,7 @@ Rom :: struct {
     load :: (rom_file: string, result: *Rom) -> bool {
         content, success := File.read_entire_file(rom_file);
         if !success {
-            Basic.log_error("Unable to open %", rom_file);
+            log_error("Unable to open %", rom_file);
             return false;
         }
         result.path = rom_file;
@@ -126,10 +126,10 @@ Rom :: struct {
         result.rom_data.count = content.count;
 
         result.type = get_rom_type(result.rom_data[ROM_CARTRIDGE]);
-        Basic.log("%", result.type);
+        log("%", result.type);
 
         result.ram_data.count = get_ram_size(result.rom_data[ROM_RAM_SIZE]);
-        result.ram_data.data = Basic.alloc(result.ram_data.count);
+        result.ram_data.data = alloc(result.ram_data.count);
         
         Rom.load_save(result);
         
@@ -144,8 +144,8 @@ Rom :: struct {
     }
 
     destroy :: (rom : *Rom) {
-        Basic.free(rom.rom_data.data);
-        Basic.free(rom.ram_data.data);
+        free(rom.rom_data.data);
+        free(rom.ram_data.data);
     }
 
     read :: (rom : *Rom, address: u16) -> u8 {
@@ -172,7 +172,7 @@ Rom :: struct {
             relative := address - 0xA000;
             return rom.ram_data[relative + 0x2000 * rom.ram_bank];    
         }
-        Basic.assert(false, "Unreachable");
+        assert(false, "Unreachable");
         return 0;
     }
 

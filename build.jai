@@ -9,7 +9,8 @@ build :: () {
     options := Compiler.get_build_options();
     options.output_path = "bin";
     options.output_executable_name = "JaiBoy";
-    options.optimization_level = .RELEASE;
+    Compiler.set_optimization(*options, .DEBUG);
+    // Compiler.set_optimization(*options, .VERY_OPTIMIZED);
 
     file_path := parse_path(#filepath);
     array_add(*file_path.words, "modules");

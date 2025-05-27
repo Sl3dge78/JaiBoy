@@ -213,7 +213,7 @@ execute :: (gb: *Gameboy) {
         case 0x10; {
             gb.cpu_clock += 10;            
             gb.step_through = true;
-            Basic.log("Stop Instruction");
+            log("Stop Instruction");
         } 
         case 0x11; { 
             gb.pc += 1;
@@ -579,7 +579,7 @@ execute :: (gb: *Gameboy) {
             if(!(gb.f & Z_FLAG)) {
                 gb.pc = pc;
                 gb.cpu_clock += 4;
-                Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+                array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
             }
         } 
         case 0xC3; {
@@ -587,7 +587,7 @@ execute :: (gb: *Gameboy) {
             from := gb.pc;
             gb.pc = pc;
             gb.cpu_clock += 16;
-            Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+            array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
         } 
         case 0xC4; {
             from: u16 = gb.pc;
@@ -599,7 +599,7 @@ execute :: (gb: *Gameboy) {
                 push_stack(gb, gb.pc);
                 gb.pc = addr;
                 gb.cpu_clock += 4;
-                Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+                array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
             }
         } 
         case 0xC5; { 
@@ -618,7 +618,7 @@ execute :: (gb: *Gameboy) {
             gb.pc += 1;
             push_stack(gb, gb.pc);
             gb.pc = 0x0000;
-            Basic.array_add(*gb.call_stack, make_stack_entry(from, 0));
+            array_add(*gb.call_stack, make_stack_entry(from, 0));
             gb.cpu_clock += 16;
         } 
         case 0xC8; {
@@ -628,14 +628,14 @@ execute :: (gb: *Gameboy) {
             if((gb.f & Z_FLAG)) {
                 gb.pc = pop_stack(gb);
                 gb.cpu_clock += 12;
-                Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+                array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
             }
         } 
         case 0xC9; {
             from: u16 = gb.pc;
             gb.pc = pop_stack(gb);
             gb.cpu_clock += 16;
-            Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+            array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
         } 
         case 0xCA; {
             from:u16 = gb.pc;
@@ -646,7 +646,7 @@ execute :: (gb: *Gameboy) {
             if(gb.f & Z_FLAG) {
                 gb.pc = pc;
                 gb.cpu_clock += 4;
-                Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+                array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
             }
         } 
         case 0xCB; {
@@ -663,7 +663,7 @@ execute :: (gb: *Gameboy) {
                 push_stack(gb, gb.pc);
                 gb.pc = pc;
                 gb.cpu_clock += 4;
-                Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+                array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
             }
         } 
         case 0xCD; {
@@ -674,7 +674,7 @@ execute :: (gb: *Gameboy) {
             push_stack(gb, gb.pc);
             gb.pc = pc;
             gb.cpu_clock += 24;
-            Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+            array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
         } 
         case 0xCE; {
             gb.pc += 1;
@@ -688,7 +688,7 @@ execute :: (gb: *Gameboy) {
             push_stack(gb, gb.pc);
             gb.pc = 0x0008;
             gb.cpu_clock += 16;
-            Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+            array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
         } 
         case 0xD0; {
             from:u16 = gb.pc;
@@ -697,7 +697,7 @@ execute :: (gb: *Gameboy) {
             if(!(gb.f & C_FLAG)) {
                 gb.pc = pop_stack(gb);
                 gb.cpu_clock += 12;
-                Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+                array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
             }
         } 
         case 0xD1; {
@@ -714,7 +714,7 @@ execute :: (gb: *Gameboy) {
             if(!(gb.f & C_FLAG)) {
                 gb.pc = pc;
                 gb.cpu_clock += 4;
-                Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+                array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
             }
         } 
         case 0xD4; {
@@ -727,7 +727,7 @@ execute :: (gb: *Gameboy) {
                 push_stack(gb, gb.pc);
                 gb.pc = pc;
                 gb.cpu_clock += 4;
-                Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+                array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
             }
         } 
         case 0xD5; { 
@@ -747,7 +747,7 @@ execute :: (gb: *Gameboy) {
             push_stack(gb, gb.pc);
             gb.pc = 0x0010;
             gb.cpu_clock += 16;
-            Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+            array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
         } 
         case 0xD8; {
             from:u16 = gb.pc;
@@ -756,7 +756,7 @@ execute :: (gb: *Gameboy) {
             if((gb.f & C_FLAG)) {
                 gb.pc = pop_stack(gb);
                 gb.cpu_clock += 12;
-                Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+                array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
             }
         } 
         case 0xD9; {
@@ -765,7 +765,7 @@ execute :: (gb: *Gameboy) {
             gb.cpu_clock += 16;
             pc := pop_stack(gb);
             gb.pc = pc;
-            Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+            array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
             gb.ime = 1;
         } 
         case 0xDA; {
@@ -777,7 +777,7 @@ execute :: (gb: *Gameboy) {
             if(gb.f & C_FLAG) {
                 gb.pc = pc;
                 gb.cpu_clock += 4;
-                Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+                array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
             }
         } 
         case 0xDC; {
@@ -790,7 +790,7 @@ execute :: (gb: *Gameboy) {
                 push_stack(gb, gb.pc);
                 gb.pc = pc;
                 gb.cpu_clock += 4;
-                Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+                array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
             }
         } 
         case 0xDE; {
@@ -805,7 +805,7 @@ execute :: (gb: *Gameboy) {
             push_stack(gb, gb.pc);
             gb.pc = 0x0018;
             gb.cpu_clock += 16;
-            Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+            array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
         } 
         case 0xE0; { 
             gb.pc += 1;
@@ -842,7 +842,7 @@ execute :: (gb: *Gameboy) {
             push_stack(gb, gb.pc);
             gb.pc = 0x0020;
             gb.cpu_clock += 16;
-            Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+            array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
         } 
         case 0xE8; {
             gb.pc += 1;
@@ -862,7 +862,7 @@ execute :: (gb: *Gameboy) {
             from:u16 = gb.pc;
             gb.pc = gb.hl;
             gb.cpu_clock += 4;
-            Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+            array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
         } 
         case 0xEA; { 
             gb.pc += 1;
@@ -883,7 +883,7 @@ execute :: (gb: *Gameboy) {
             push_stack(gb, gb.pc);
             gb.pc = 0x0028;
             gb.cpu_clock += 16;
-            Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+            array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
         } 
         case 0xF0; { 
             gb.pc += 1;
@@ -926,7 +926,7 @@ execute :: (gb: *Gameboy) {
             push_stack(gb, gb.pc);
             gb.pc = 0x0030;
             gb.cpu_clock += 16;
-            Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+            array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
         } 
         case 0xF8; {
             gb.pc += 1;
@@ -976,7 +976,7 @@ execute :: (gb: *Gameboy) {
             push_stack(gb, gb.pc);
             gb.pc = 0x0038;
             gb.cpu_clock += 16;
-            Basic.array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
+            array_add(*gb.call_stack, make_stack_entry(from, gb.pc));
         } 
         case;
         if(op_code >= 0x40 && op_code <= 0x7F) { // LD
@@ -1005,7 +1005,7 @@ execute :: (gb: *Gameboy) {
             gb.pc += 1;
             
         } else {
-            Basic.log("Unimplemented opcode : 0x%", hex(read(gb, gb.pc)));
+            log("Unimplemented opcode : 0x%", hex(read(gb, gb.pc)));
             gb.cpu_clock += 1;
             gb.pc += 1;
             gb.step_through = true;
@@ -1072,7 +1072,7 @@ gbGetFromByteCode :: (gb : *Gameboy, id: u8) -> u8 {
         case 5; return gb.l;
         case 6; return read(gb, gb.hl);
         case 7; return gb.a;
-        case; Basic.assert(false); return 0;
+        case; assert(false); return 0;
     }
 }
 
@@ -1086,7 +1086,7 @@ gbSetFromByteCode :: (gb : *Gameboy, id: u8, value: u8) {
         case 5; gb.l = value; return;
         case 6; write(gb, gb.hl, value); return;
         case 7; gb.a = value; return;
-        case; Basic.assert(false); return;
+        case; assert(false); return;
     }
 }
 

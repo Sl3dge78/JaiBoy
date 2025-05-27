@@ -60,7 +60,7 @@ Channel4 :: struct  {
 
 APU :: struct {
     sample_rate: u32;
-    audio_device: SDL_AudioDeviceID;
+    stream: *SDL_AudioStream;
     audio_gain: u32;
     
     carry : u64;
@@ -292,10 +292,11 @@ audio :: (gb : *Gameboy) {
     // Queue audio
     while apu.sample_clock <= 0 {
         sample : u8 = xx(cast(s16)get_sample(apu, gb.mem) + 127);
-        SDL_QueueAudio(apu.audio_device, *sample, 1);
+        SDL_PutAudioStreamData(apu.stream, *sample, 1);
         apu.sample_clock += (gb.clock_speed + apu.carry) / apu.sample_rate;
         apu.carry = (gb.clock_speed + apu.carry) % apu.sample_rate;
     }
+    // SDL_FlushAudioStream(apu.stream);
     apu.sample_clock -= 1;
     apu.frame_clock -= 1;
 }
@@ -305,14 +306,12 @@ init_audio :: (gb : *Gameboy, apu: *APU) {
     apu.audio_gain = 2000;
 
     audio_spec : SDL_AudioSpec;
+    audio_spec.format = .U8;
+    audio_spec.channels = 1; // @TODO: Stereo
     audio_spec.freq = xx apu.sample_rate;
-    audio_spec.format = AUDIO_U8;
-    audio_spec.channels = 1; // @todo Switch to stereo
-    audio_spec.samples = 1024;
-    audio_spec.userdata = apu;
 
     got : SDL_AudioSpec;
-    apu.audio_device = SDL_OpenAudioDevice(null, 0, *audio_spec, *got, 0);
+    apu.stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, *audio_spec, null, null);
     
     gb.mem[IO_NR50] = 0x77;
     gb.mem[IO_NR51] = 0xF3;
@@ -347,5 +346,4 @@ init_audio :: (gb : *Gameboy, apu: *APU) {
     for wave {
         gb.mem[IO_WAV + it_index] = it;
     }
-    SDL_PauseAudioDevice(gb.apu.audio_device, 0);
 }
