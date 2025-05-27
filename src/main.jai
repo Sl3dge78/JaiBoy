@@ -23,8 +23,10 @@ main :: () {
 
     SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO | SDL_INIT_EVENTS);
     defer SDL_Quit();
+    version := SDL_GetVersion();
+    log("SDL Version: %.%.%", version / 1000000, (version / 1000) % 1000, (version % 1000));
 
-    window := SDL_CreateWindow("JaiBoy", SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_VULKAN);
+    window := SDL_CreateWindow("JaiBoy", SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_RESIZABLE);
     defer SDL_DestroyWindow(window);
 
     renderer := SDL_CreateRenderer(window, null);
@@ -35,12 +37,15 @@ main :: () {
     // ImplSDL3_InitForSDLRenderer(window, renderer);
     // defer ImplSDL3_Shutdown();
 
+    SDL_SetRenderLogicalPresentation(renderer, SCREEN_WIDTH, SCREEN_HEIGHT, .LETTERBOX);
+
     // Gameboy
     gb := New(Gameboy);
     defer free(gb);
  
     gb_texture := SDL_CreateTexture(renderer, .ABGR8888, .STREAMING, SCREEN_WIDTH, SCREEN_HEIGHT);
     SDL_SetTextureBlendMode(gb_texture, 0);
+    SDL_SetTextureScaleMode(gb_texture, .NEAREST);
     display_size := 1;
 
     show_debug := false;
@@ -61,6 +66,7 @@ main :: () {
         time := SDL_GetPerformanceCounter();
         delta_time = cast(float)(time - frame_start) / SDL_GetPerformanceFrequency();
         frame_start = time;
+        log("%", delta_time);
 
         event: SDL_Event;
         while SDL_PollEvent(*event) {
@@ -128,7 +134,6 @@ copy_lcd_to_texture :: (gb: *Gameboy, texture: *SDL_Texture) {
         for x: 0..SCREEN_WIDTH - 1 {
             pixel := gb.lcd_screen[y][x];
             color := palette[pixel];
-            // data[x + y * SCREEN_WIDTH] = .{ color.a, color.b, color.g, color.r };
             data[x + y * SCREEN_WIDTH] = color;
         }
     }

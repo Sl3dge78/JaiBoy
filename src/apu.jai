@@ -89,13 +89,13 @@ get_square_duty :: (byte : u8) -> float{
 
 tone_channel :: (time : *float, duty : u8, pitch : u16, volume : s8, sample_rate : u32) -> s8 {
     result : s8 = 0;
-    if(<< time <= get_square_duty(duty))
+    if(time.* <= get_square_duty(duty))
         result = 1;
     else
         result = -1;
-    << time += cast(float)pitch * 1.0 / cast(float)sample_rate;
-    if << time > 1.0 {
-        << time = 0.0;
+    time.* += cast(float)pitch * 1.0 / cast(float)sample_rate;
+    if time.* > 1.0 {
+        time.* = 0.0;
     }
     result *= volume;
     return result;
@@ -290,13 +290,16 @@ audio :: (gb : *Gameboy) {
     noise_update(gb, *gb.apu.channel4);
 
     // Queue audio
+    if apu.sample_clock < 0 {
+        SDL_ClearAudioStream(apu.stream);
+    }
+    // @Todo this gets out of sync if we're slower than 60fps
     while apu.sample_clock <= 0 {
         sample : u8 = xx(cast(s16)get_sample(apu, gb.mem) + 127);
         SDL_PutAudioStreamData(apu.stream, *sample, 1);
         apu.sample_clock += (gb.clock_speed + apu.carry) / apu.sample_rate;
         apu.carry = (gb.clock_speed + apu.carry) % apu.sample_rate;
     }
-    // SDL_FlushAudioStream(apu.stream);
     apu.sample_clock -= 1;
     apu.frame_clock -= 1;
 }
