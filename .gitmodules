@@ -1,6 +1,0 @@
-[submodule "simp_sdl"]
-	path = simp_sdl
-	url = https://github.com/Sl3dge78/simp_sdl.git
-[submodule "modules/simp_sdl"]
-	path = modules/simp_sdl
-	url = https://github.com/Sl3dge78/simp_sdl.git
