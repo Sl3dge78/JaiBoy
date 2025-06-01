@@ -1005,7 +1005,7 @@ execute :: (gb: *Gameboy) {
             gb.pc += 1;
             
         } else {
-            log("Unimplemented opcode : 0x%. At %.", hex(read(gb, gb.pc)), hex(gb.pc));
+            log("Unimplemented opcode : 0x%. At %.", formatInt(read(gb, gb.pc), base = 16), formatInt(gb.pc, base = 16));
             gb.cpu_clock += 1;
             gb.pc += 1;
             gb.step_through = true;

@@ -123,6 +123,8 @@ Gameboy :: struct {
     call_stack: [..]Stack_Entry;
 }
 
+breakpoints: [..]u16;
+
 init :: (using gb: *Gameboy) {       
     mem.data = alloc(MEM_SIZE);
     mem.count = MEM_SIZE;
@@ -158,6 +160,7 @@ reset :: (using gb: *Gameboy) {
     Rom.reset(*gb.rom);
 
     gb.call_stack.count = 0;
+    gb.halted = false;
 }
 
 load_rom :: (gb: *Gameboy, file : string) -> bool {
@@ -419,3 +422,15 @@ loop :: (gb: *Gameboy, delta_time: float) {
         gb.cycles_left -=1;
     }
 }
+
+breakpoint :: (gb : *Gameboy) {
+    gb.step_through = true;
+    gb.cycles_left = 0;
+}
+
+
+#load "apu.jai";
+#load "cpu.jai";
+#load "ppu.jai";
+#load "rom.jai";
+#import,dir "../modules/jai-sdl3";

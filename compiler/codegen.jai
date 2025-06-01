@@ -1,39 +1,91 @@
+build_cart :: (file: string, verbose := false) -> MBC1 {
+    w := compiler_create_workspace();
+    
+    options := get_build_options();
+    options.output_type = .NO_OUTPUT;
+    options.runtime_support_definitions = .OMIT;
 
-generate_assembly :: (procedures: [..]*Code_Procedure_Header) {
+    procedures : [..] *Code_Procedure_Header;
+
+    set_build_options(options, w);
+    compiler_begin_intercept(w);
+    add_build_file(file, w);
+
+    while true {
+        msg := compiler_wait_for_message();
+        if !msg continue;
+        if msg.kind == .TYPECHECKED {
+            tc := cast(*Message_Typechecked) msg;
+            gather(tc, *procedures);
+        }
+
+        if msg.kind == .COMPLETE {
+            break;
+        }
+
+    }
+    compiler_end_intercept(w);
+    set_build_options_dc(.{do_output = false});
+    ok, cart := generate_assembly(procedures, verbose);
+    assert(ok);
+    return cart;
+}
+
+gather :: (msg: *Message_Typechecked, procedures: *[..]*Code_Procedure_Header) {
+    for tc: msg.all {
+        expr := tc.expression;
+        if expr.enclosing_load {
+            if expr.enclosing_load.enclosing_import.module_type != .MAIN_PROGRAM then continue;
+        }
+
+        if expr.kind == {
+            case .PROCEDURE_HEADER; {
+                array_add(procedures, cast(*Code_Procedure_Header) expr);
+            }
+
+            case; {
+                if expr.enclosing_load == null { 
+                    // log_error("Unsupported expression: %. Line %", expr.kind, expr.l0);
+                } else { 
+                    // compiler_report(expr.enclosing_load.fully_pathed_filename, expr.l0, expr.c0, tprint("Unsupported expr: %", expr.kind));
+                }
+            }
+        }
+    }
+}
+
+
+generate_assembly :: (procedures: [..]*Code_Procedure_Header, verbose := false) -> bool, MBC1 {
     compiled : [..]Compiled_Procedure;
     for procedures {
         ok, proc := generate_procedure(it);
         if !ok {
             log_error("Error compiling procedure. Exiting.");
-            return;
+            return false, .{};
         }
         array_add(*compiled, proc);
+        if verbose {
+            log("%:", it.name);
+            dump_procedure(proc);
+        }
     }
-    output_rom(compiled);
+    cart := output_rom(compiled);
+    return true, cart;
 }
 
-output_rom :: (compiled: []Compiled_Procedure) {
+output_rom :: (compiled: []Compiled_Procedure) -> MBC1 {
     builder: String_Builder;
-    cart := New(MBC1);
-    defer free(cart);
+    cart := New(MBC1,, temp);
 
     cart.header.entry_point = .[0xc3, 0x50, 0x1, 0x0];
-    log("%", formatInt(cart.contents[0x100], base = 16));
-    log("%", formatInt(cart.contents[0x101], base = 16));
-    log("%", formatInt(cart.contents[0x102], base = 16));
-    log("%", formatInt(cart.contents[0x103], base = 16));
-
-    log("%", compiled.count);
     for compiled {
         assert(it.base_address != 0);
         i := it.base_address;
         memcpy(cart.contents.data + i, it.bytes.data, it.bytes.count);
-        dump_procedure(it);
     }
 
-    filename := "output_rom.gb";
-    write_entire_file(filename, cart.contents.data, cart.contents.count);
-    log("Wrote %", filename);
+    return cart;
+
 }
 
 dump_procedure :: (proc: Compiled_Procedure) {
@@ -64,7 +116,7 @@ dump_procedure :: (proc: Compiled_Procedure) {
         // Operands
         i2 := op.bytes - 1;
         while (i2 >= 1) {
-            print_to_builder(*builder, "%", formatInt(proc.bytes[i2], 16, 2));
+            print_to_builder(*builder, "%", formatInt(proc.bytes[i + i2], 16, 2));
             i2 -= 1;
         }
 
@@ -75,7 +127,6 @@ dump_procedure :: (proc: Compiled_Procedure) {
 }
 
 generate_procedure :: (proc: *Code_Procedure_Header) -> bool, Compiled_Procedure {
-    log("Compiling %", proc.name);
     result: Compiled_Procedure;
     assert(proc.body_or_null != null, "Procedure didn't compile?");
     body := proc.body_or_null;
@@ -129,29 +180,29 @@ compile_statement :: (node: *Code_Node, procedure: *Compiled_Procedure, destinat
             if decl.expression == null {
                 log_error("I don't know what to do here");
             } else {
-                if !compile_statement(decl.expression, procedure, .B) { return false; }
-                output_bytes(procedure, load_instruction(destination_register, .B));
+                if !compile_statement(decl.expression, procedure, .A) { return false; }
             }
 
             return true;
         }
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
+            compile_statement(bin_op.left, procedure, .A);
+            compile_statement(bin_op.right, procedure, .B);
             if bin_op.operator_type == {
-                case #char "+"; {
-                    compile_statement(bin_op.left, procedure, .A);
-                    compile_statement(bin_op.right, procedure, .B);
-                    output_bytes(procedure, 0x80); // ADD A, B
-                    if destination_register != .A {
-                        output_bytes(procedure, load_instruction(destination_register, .A));
-                    }
-                    return true;
-                }
-                case; {
+                case #char "+"; output_bytes(procedure, 0x80); // ADD A, B
+                case #char "-"; output_bytes(procedure, 0x90); // SUB B
+                case #char "&"; output_bytes(procedure, 0xA0); // AND B
+                case #char "|"; output_bytes(procedure, 0xB0); // OR  B
+                case; { 
                     log_error("Unhandled binary operator");
                     return false;
                 }
             }
+            if destination_register != .A {
+                output_bytes(procedure, load_instruction(destination_register, .A));
+            }
+            return true;
         }
         case .LITERAL; {
             lit := node.(*Code_Literal);
@@ -176,7 +227,7 @@ compile_statement :: (node: *Code_Node, procedure: *Compiled_Procedure, destinat
             };
         }
         case; {
-            log("Unhandled statement kind: %", node.kind);
+            log_error("Unhandled statement kind: %", node.kind);
             return false;
         }
     }
@@ -266,3 +317,5 @@ MBC1 :: struct {
     #place header;
     contents: [0x8000]u8;
 }
+
+#load "../common/opcodes.jai";

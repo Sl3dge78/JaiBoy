@@ -18,11 +18,6 @@ bin :: (val: u16) -> FormatInt #expand {
     return formatInt(val, 2, 16);
 }
 
-breakpoint :: (gb : *Gameboy) {
-    gb.step_through = true;
-    gb.cycles_left = 0;
-}
-
 init_debug :: () {
     debug_window = SDL_CreateWindow("Debug",500, 500, SDL_WINDOW_BORDERLESS);
     state = init_immediate(debug_window);
@@ -34,12 +29,6 @@ deinit_debug :: () {
     deinit_immediate(*state);
     SDL_DestroyWindow(debug_window);
 }
-
-disassembly_from_pc := true;
-disassembly_addr : u16 = 0;
-disassembly_addr_buf: [32]u8;
-breakpoint_buf: [32]u8;
-breakpoints: [..]u16;
 
 draw_debug :: (gb : *Gameboy) {
     cursor();
@@ -280,3 +269,5 @@ debug_audio :: (gb: *Gameboy) {
     // }
     // ImGui.End();
 }
+
+#load "../common/opcodes.jai";

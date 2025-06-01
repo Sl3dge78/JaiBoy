@@ -55,7 +55,7 @@ get_rom_type :: (id : u8) -> Rom_Type {
         case 0x1D; #through;
         case 0x1E; return .MBC5;
         case; { 
-            log_error("Cartidge type % is not supported. Some things might not work.", hex(id));
+            log_error("Cartidge type % is not supported. Some things might not work.", formatInt(id, base = 16));
             return .NONE;
         }
     }
@@ -100,7 +100,7 @@ Rom :: struct {
 
         if !File_Utilities.file_exists(save_path) then return false;
 
-        save, success := File.read_entire_file(save_path);
+        save, success := read_entire_file(save_path);
         defer free(save);
         if !success {
             log_error("Unable to read save file at %.", save_path);
@@ -116,12 +116,15 @@ Rom :: struct {
     }
 
     load :: (rom_file: string, result: *Rom) -> bool {
-        content, success := File.read_entire_file(rom_file);
+        content, success := read_entire_file(rom_file);
         if !success {
             log_error("Unable to open %", rom_file);
             return false;
         }
-        result.path = rom_file;
+        return load_from_memory(content.([]u8), rom_file, result);
+    }
+
+    load_from_memory :: (content: []u8, path: string, result: *Rom) -> bool {
         result.rom_data.data = content.data;
         result.rom_data.count = content.count;
 
@@ -129,9 +132,7 @@ Rom :: struct {
 
         result.ram_data.count = get_ram_size(result.rom_data[ROM_RAM_SIZE]);
         result.ram_data.data = alloc(result.ram_data.count);
-        
         Rom.load_save(result);
-        
         return true;
     }
 
@@ -182,9 +183,9 @@ Rom :: struct {
                 return;
             } else {
                 rom.ram_enabled = false;
-                save_file := File.file_open(Rom.get_save_path(rom.path), for_writing = true, keep_existing_content = false);
-                File.file_write(*save_file, rom.ram_data.data, rom.ram_data.count);
-                File.file_close(*save_file);
+                save_file := file_open(Rom.get_save_path(rom.path), for_writing = true, keep_existing_content = false);
+                file_write(*save_file, rom.ram_data.data, rom.ram_data.count);
+                file_close(*save_file);
                 return;
             } 
         } else if address >= 0x2000 && address <= 0x3FFF {

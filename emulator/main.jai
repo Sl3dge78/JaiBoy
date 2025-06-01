@@ -6,14 +6,8 @@
 File :: #import "File";
 ImGui :: #import "ImGui";
 
-#load "gb.jai";
-#load "cpu.jai";
-#load "ppu.jai";
-#load "rom.jai";
-#load "apu.jai";
-#load "../common/opcodes.jai";
+#load "../common/gb.jai";
 
-#load "debug.jai";
 #load "imgui_render.jai";
 
 Vector2i :: struct {
