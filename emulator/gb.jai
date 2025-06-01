@@ -1,8 +1,3 @@
-#load "cpu.jai";
-#load "ppu.jai";
-#load "rom.jai";
-#load "apu.jai";
-
 CLOCK_SPEED ::   4194304;
 
 SCREEN_WIDTH ::  160;

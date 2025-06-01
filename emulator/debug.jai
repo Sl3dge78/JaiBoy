@@ -1,9 +1,6 @@
 
-tiles_tex: u32;
-map_1_tex: u32;
-map_2_tex: u32;
-
-windows_open : bool;
+debug_window: *SDL_Window;
+state: Immediate_State;
 
 hex :: (val: u16) -> FormatInt #expand {
     return formatInt(val, 16, 4);
@@ -27,21 +24,15 @@ breakpoint :: (gb : *Gameboy) {
 }
 
 init_debug :: () {
-    // @TODO
-    // glGenTextures(1, *map_1_tex);
-    // glBindTexture(GL_TEXTURE_2D, map_1_tex);
-    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    //
-    // glGenTextures(1, *map_2_tex);
-    // glBindTexture(GL_TEXTURE_2D, map_2_tex);
-    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    //
-    // glGenTextures(1, *tiles_tex);
-    // glBindTexture(GL_TEXTURE_2D, tiles_tex);
-    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    debug_window = SDL_CreateWindow("Debug",500, 500, SDL_WINDOW_BORDERLESS);
+    state = init_immediate(debug_window);
+    log("init");
+}
+
+deinit_debug :: () {
+    log("deinit");
+    deinit_immediate(*state);
+    SDL_DestroyWindow(debug_window);
 }
 
 disassembly_from_pc := true;
@@ -51,81 +42,60 @@ breakpoint_buf: [32]u8;
 breakpoints: [..]u16;
 
 draw_debug :: (gb : *Gameboy) {
+    cursor();
+    camera(0, 0);
+    SDL_SetRenderDrawColor(state.renderer, 10, 10, 10, 255);
+    SDL_RenderClear(state.renderer);
 
     // if ImGui.Begin("Debug") {
-    //     ImGui.Text("pc   : 0x%", formatInt(gb.pc, 16, 4));
-    //     ImGui.Text("af   : 0x%", formatInt(gb.a, 16, 2));
-    //     ImGui.Text("bc   : 0x%", formatInt(gb.bc, 16, 4));
-    //     ImGui.Text("de   : 0x%", formatInt(gb.de, 16, 4));
-    //     ImGui.Text("hl   : 0x%", formatInt(gb.hl, 16, 4));
-    //     ImGui.Text("sp   : 0x%", formatInt(gb.sp, 16, 4));
-    //     ImGui.Text("ZNHC : %",   formatInt(gb.f >> 4, 2, 4));
-    //     ImGui.Text("(hl) : 0x%", formatInt(read(gb, gb.hl), 16, 2));
-    //     ImGui.Text("-");
-    //     ImGui.Text("IO_JOY  (FF00): 0x%", hex(gb.mem[IO_JOY]));
-    //     ImGui.Text("IO_SB   (FF01): 0x%", hex(gb.mem[IO_SB]));
-    //     ImGui.Text("IO_SC   (FF02): 0x%", hex(gb.mem[IO_SC]));
-    //     ImGui.Text("IO_DIV  (FF04): 0x%", hex(gb.mem[IO_DIV]));
-    //     ImGui.Text("IO_TIMA (FF05): 0x%", hex(gb.mem[IO_TIMA]));
-    //     ImGui.Text("IO_TMA  (FF06): 0x%", hex(gb.mem[IO_TMA]));
-    //     ImGui.Text("IO_TAC  (FF07): 0x%", hex(gb.mem[IO_TAC]));
-    //     ImGui.Text("-");
-    //     ImGui.Text("LCDC (FF40) : 0b% - 0x%", bin(gb.mem[IO_LCDC]), hex(gb.mem[IO_LCDC]));
-    //     ImGui.Text("STAT (FF41) : 0b% - 0x%", bin(gb.mem[IO_STAT]), hex(gb.mem[IO_STAT]));
-    //     ImGui.Text("SCY  (FF42) : 0x%", hex(gb.mem[IO_SCY]));
-    //     ImGui.Text("SCX  (FF43) : 0x%", hex(gb.mem[IO_SCX]));
-    //     ImGui.Text("LY   (FF44) : 0x%", hex(gb.mem[IO_LY]));
-    //     ImGui.Text("LYC  (FF45) : 0x%", hex(gb.mem[IO_LYC]));
-    //     ImGui.Text("DMA  (FF46) : 0x%", hex(gb.mem[IO_DMA]));
-    //     ImGui.Text("BGP  (FF47) : 0x%", hex(gb.mem[IO_BGP]));
-    //     ImGui.Text("OBP0 (FF48) : 0x%", hex(gb.mem[IO_OBP0]));
-    //     ImGui.Text("OBP1 (FF49) : 0x%", hex(gb.mem[IO_OBP1]));
-    //     ImGui.Text("WY   (FF4A) : 0x%", hex(gb.mem[IO_WY]));
-    //     ImGui.Text("WX   (FF4B) : 0x%", hex(gb.mem[IO_WX]));
-    //     ImGui.Text("-");
-    //     ImGui.Text("IME         : %", gb.ime);
-    //     ImGui.Text("IF   (FF0F) : 0b% - 0x%", bin(gb.mem[IO_IF]), hex(gb.mem[IO_IF]));
-    //     ImGui.Text("IE   (FFFF) : 0b% - 0x%", bin(gb.mem[IO_IE]), hex(gb.mem[IO_IE]));
-    //     ImGui.Text("CLOCKMUL    : %", gb.clock_mul);
-    //     ImGui.Text("HALTED    : %", gb.halted);
-    // }
-    // ImGui.End();
-    //
-    // if ImGui.Begin("Disassembly") {
-    //     if ImGui.TreeNode("Breakpoints") {
-    //         ImGui.InputText("New BP", breakpoint_buf.data, breakpoint_buf.count);
-    //         ImGui.SameLine();
-    //         if ImGui.Button("Add") {
-    //             got_addr, success := string_to_int(to_string(breakpoint_buf.data), 16);
-    //             if success {
-    //                 array_add(*breakpoints, xx got_addr);
-    //             }
-    //         }
-    //         for *breakpoints {
-    //             ImGui.Text("% - %", it_index, hex(<<it));
-    //             ImGui.SameLine();
-    //             if ImGui.Button("-") {
-    //                 remove it;
-    //             }
-    //         }
-    //         ImGui.TreePop();
-    //     }
-    //     ImGui.Checkbox("From PC", *disassembly_from_pc);
-    //     if !disassembly_from_pc {
-    //         ImGui.InputText("Start address", disassembly_addr_buf.data, disassembly_addr_buf.count);
-    //         got_addr, success := string_to_int(to_string(disassembly_addr_buf.data), 16);
-    //         disassembly_addr = xx got_addr;
-    //     } else {
-    //         disassembly_addr = gb.pc;
-    //     }
-    //
-    //     addr := disassembly_addr;
-    //     for 0..20 {
-    //         addr = print_instruction(gb, addr);
-    //     }
-    // }
-    // ImGui.End();
-    //
+    SDL_SetRenderDrawColor(state.renderer, 255, 255, 255, 255);
+    text(tprint("pc   : 0x%", formatInt(gb.pc, 16, 4)));
+    text(tprint("af   : 0x%", formatInt(gb.a, 16, 2)));
+    text(tprint("bc   : 0x%", formatInt(gb.bc, 16, 4)));
+    text(tprint("de   : 0x%", formatInt(gb.de, 16, 4)));
+    text(tprint("hl   : 0x%", formatInt(gb.hl, 16, 4)));
+    text(tprint("sp   : 0x%", formatInt(gb.sp, 16, 4)));
+    text(tprint("ZNHC : %",   formatInt(gb.f >> 4, 2, 4)));
+    text(tprint("(hl) : 0x%", formatInt(read(gb, gb.hl), 16, 2)));
+    state.cy += 12;
+    text(tprint("IME         : %", gb.ime));
+    text(tprint("IF   (FF0F) : 0b% - 0x%", bin(gb.mem[IO_IF]), hex(gb.mem[IO_IF])));
+    text(tprint("IE   (FFFF) : 0b% - 0x%", bin(gb.mem[IO_IE]), hex(gb.mem[IO_IE])));
+    text(tprint("CLOCKMUL    : %", gb.clock_mul));
+    text(tprint("HALTED    : %", gb.halted));
+    cursor(100);
+    text(tprint("IO_JOY  (FF00): 0x%", hex(gb.mem[IO_JOY])));
+    text(tprint("IO_SB   (FF01): 0x%", hex(gb.mem[IO_SB])));
+    text(tprint("IO_SC   (FF02): 0x%", hex(gb.mem[IO_SC])));
+    text(tprint("IO_DIV  (FF04): 0x%", hex(gb.mem[IO_DIV])));
+    text(tprint("IO_TIMA (FF05): 0x%", hex(gb.mem[IO_TIMA])));
+    text(tprint("IO_TMA  (FF06): 0x%", hex(gb.mem[IO_TMA])));
+    text(tprint("IO_TAC  (FF07): 0x%", hex(gb.mem[IO_TAC])));
+    cursor(250);
+    text(tprint("LCDC (FF40) : 0b% - 0x%", bin(gb.mem[IO_LCDC]), hex(gb.mem[IO_LCDC])));
+    text(tprint("STAT (FF41) : 0b% - 0x%", bin(gb.mem[IO_STAT]), hex(gb.mem[IO_STAT])));
+    text(tprint("SCY  (FF42) : 0x%", hex(gb.mem[IO_SCY])));
+    text(tprint("SCX  (FF43) : 0x%", hex(gb.mem[IO_SCX])));
+    text(tprint("LY   (FF44) : 0x%", hex(gb.mem[IO_LY])));
+    text(tprint("LYC  (FF45) : 0x%", hex(gb.mem[IO_LYC])));
+    text(tprint("DMA  (FF46) : 0x%", hex(gb.mem[IO_DMA])));
+    text(tprint("BGP  (FF47) : 0x%", hex(gb.mem[IO_BGP])));
+    text(tprint("OBP0 (FF48) : 0x%", hex(gb.mem[IO_OBP0])));
+    text(tprint("OBP1 (FF49) : 0x%", hex(gb.mem[IO_OBP1])));
+    text(tprint("WY   (FF4A) : 0x%", hex(gb.mem[IO_WY])));
+    text(tprint("WX   (FF4B) : 0x%", hex(gb.mem[IO_WX])));
+
+    cursor(0, 130);
+    line(0, 130, 500, 130);
+    text("Disassembly");
+    state.cy += 12;
+
+    addr := gb.pc;
+    for 0..20 {
+        addr = print_instruction(gb, addr);
+
+    }
+
     // if ImGui.Begin("TILES") {
     //     draw_tiles(gb);
     // }
@@ -149,6 +119,9 @@ draw_debug :: (gb : *Gameboy) {
     // ImGui.End();
 
     debug_audio(gb);
+    cursor(0, 488);
+    text("[F5] hide this | [F9/SPACE] step | [F7/N] Trace | [R] Reset");
+    SDL_RenderPresent(state.renderer);
     
 }
 
@@ -157,34 +130,32 @@ print_instruction :: (gb : *Gameboy, addr : u16) -> u16 {
     builder : String_Builder;
     
     // Addr
-    // ImGui.Text("%", formatInt(addr, 16, 4));
-    //
-    //
-    // // Bytes
-    // print_to_builder(*builder, "% ", formatInt(read(gb, addr), 16, 2));
-    // for 1..op.bytes - 1 {
-    //     print_to_builder(*builder, "% ", formatInt(read(gb, addr + it), 16, 2));
-    // }
-    // builder_string := builder_to_string(*builder);
-    // reset(*builder);
-    // defer free(builder_string);
-    // ImGui.SameLine(50);
-    // ImGui.Text(builder_string);
-    //
-    // // Desc
-    // ImGui.SameLine(150);
-    // ImGui.Text("%", op.desc);
-    //
-    // // Operands
-    // i := op.bytes - 1;
-    // while (i >= 1) {
-    //     print_to_builder(*builder, "%", formatInt(read(gb, addr + i), 16, 2));
-    //     i -= 1;
-    // }
-    // operand_string := builder_to_string(*builder);
-    // defer free(operand_string);
-    // ImGui.SameLine(275);
-    // ImGui.Text("%", operand_string);
+    print_to_builder(*builder, "0x% ", formatInt(addr, 16, 4));
+
+    // Bytes
+    print_to_builder(*builder, "% ", formatInt(read(gb, addr), 16, 2));
+    for 1..op.bytes - 1 {
+        print_to_builder(*builder, "% ", formatInt(read(gb, addr + it), 16, 2));
+    }
+    while builder_string_length(*builder) < 20 {
+        append(*builder, " ");
+    }
+
+    // Desc
+    print_to_builder(*builder, "%", op.desc);
+    while builder_string_length(*builder) < 32 {
+        append(*builder, " ");
+    }
+
+    // Operands
+    i := op.bytes - 1;
+    while (i >= 1) {
+        print_to_builder(*builder, "%", formatInt(read(gb, addr + i), 16, 2));
+        i -= 1;
+    }
+
+    builder_string := builder_to_string(*builder,, temp);
+    text(builder_string);
     return addr + op.bytes;
 }
 

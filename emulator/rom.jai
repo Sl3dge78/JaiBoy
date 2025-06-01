@@ -126,7 +126,6 @@ Rom :: struct {
         result.rom_data.count = content.count;
 
         result.type = get_rom_type(result.rom_data[ROM_CARTRIDGE]);
-        log("%", result.type);
 
         result.ram_data.count = get_ram_size(result.rom_data[ROM_RAM_SIZE]);
         result.ram_data.data = alloc(result.ram_data.count);

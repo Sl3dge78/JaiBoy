@@ -1,0 +1,3 @@
+[submodule "modules/jai-sdl3"]
+	path = modules/jai-sdl3
+	url = https://github.com/overlord-systems/jai-sdl3

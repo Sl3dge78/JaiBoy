@@ -1,20 +1,29 @@
 #import "Basic";
 #import "jai-sdl3";
 #import "Math";
+#import "stb_image";
+#import "System";
 File :: #import "File";
+ImGui :: #import "ImGui";
 
 #load "gb.jai";
+#load "cpu.jai";
+#load "ppu.jai";
+#load "rom.jai";
+#load "apu.jai";
+#load "../common/opcodes.jai";
+
 #load "debug.jai";
-#load "opcodes.jai";
+#load "imgui_render.jai";
 
 Vector2i :: struct {
     x : s32;
     y : s32;
 }
 
-
-
 main :: () {
+    exec_path :=  get_path_of_running_executable();
+    set_working_directory(exec_path);
 
     if __command_line_arguments.count != 2 {
         log("Usage : gb_jai [path/to/rom.gb]");
@@ -24,18 +33,12 @@ main :: () {
     SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO | SDL_INIT_EVENTS);
     defer SDL_Quit();
     version := SDL_GetVersion();
-    log("SDL Version: %.%.%", version / 1000000, (version / 1000) % 1000, (version % 1000));
 
     window := SDL_CreateWindow("JaiBoy", SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_RESIZABLE);
     defer SDL_DestroyWindow(window);
 
     renderer := SDL_CreateRenderer(window, null);
     defer SDL_DestroyRenderer(renderer);
-
-    // ImGui
-    // ImGui.CreateContext();
-    // ImplSDL3_InitForSDLRenderer(window, renderer);
-    // defer ImplSDL3_Shutdown();
 
     SDL_SetRenderLogicalPresentation(renderer, SCREEN_WIDTH, SCREEN_HEIGHT, .LETTERBOX);
 
@@ -48,8 +51,6 @@ main :: () {
     SDL_SetTextureScaleMode(gb_texture, .NEAREST);
     display_size := 1;
 
-    show_debug := false;
-    init_debug();
 
     init(gb);
     defer destroy(gb);
@@ -58,6 +59,12 @@ main :: () {
         return;
     }
     reset(gb);
+
+    show_debug := true;
+    if show_debug {
+        init_debug();
+        gb.step_through = true;
+    }
         
     delta_time : float = 0;
     frame_start := SDL_GetPerformanceCounter();
@@ -66,12 +73,10 @@ main :: () {
         time := SDL_GetPerformanceCounter();
         delta_time = cast(float)(time - frame_start) / SDL_GetPerformanceFrequency();
         frame_start = time;
-        log("%", delta_time);
 
         event: SDL_Event;
         while SDL_PollEvent(*event) {
-            // ImplSDL3_ProcessEvent(*event);
-            if event.type == { 
+            if event.type.(SDL_EventType) == { 
                 case .QUIT;
                     break main_loop;
                 case .KEY_DOWN; {
@@ -80,7 +85,14 @@ main :: () {
                         case ._2; display_size = 2;
                         case ._3; display_size = 3;
 
-                        case .F5; show_debug = !show_debug;
+                        case .F5; {
+                            show_debug = !show_debug;
+                            if show_debug {
+                                init_debug();
+                            } else {
+                                deinit_debug();
+                            }
+                        }
 
                         // Break
                         case .SPACE; #through; 
@@ -111,13 +123,7 @@ main :: () {
         copy_lcd_to_texture(gb, gb_texture);
         SDL_RenderTexture(renderer, gb_texture, null, null);
 
-        // ImplSDL3_NewFrame();
-        // ImGui.NewFrame();
-
         if show_debug then draw_debug(gb);
-
-        // ImGui.Render();
-        // ImplSDL3_RenderDrawData(ImGui.GetDrawData());
 
         reset_temporary_storage();
         SDL_RenderPresent(renderer);

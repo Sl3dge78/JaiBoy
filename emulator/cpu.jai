@@ -583,7 +583,7 @@ execute :: (gb: *Gameboy) {
             }
         } 
         case 0xC3; {
-            pc:= read_u16(gb, gb.pc + 1);
+            pc := read_u16(gb, gb.pc + 1);
             from := gb.pc;
             gb.pc = pc;
             gb.cpu_clock += 16;
@@ -1005,7 +1005,7 @@ execute :: (gb: *Gameboy) {
             gb.pc += 1;
             
         } else {
-            log("Unimplemented opcode : 0x%", hex(read(gb, gb.pc)));
+            log("Unimplemented opcode : 0x%. At %.", hex(read(gb, gb.pc)), hex(gb.pc));
             gb.cpu_clock += 1;
             gb.pc += 1;
             gb.step_through = true;
