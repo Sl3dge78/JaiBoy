@@ -1,7 +1,7 @@
 
 main :: () {
     a := 0;
-    if false {
+    if true {
         a = 1;
     } else {
         a = 2;

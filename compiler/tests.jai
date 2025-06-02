@@ -58,7 +58,8 @@ test_program :: (path: string, gb: *Gameboy, verifs: ..CPU_Verification) {
         print_color("Failed!\n", color = .RED);
         print_color("%\n", builder_to_string(*builder), color = .RED);
     } else {
-        print_color("OK!\n", color = .GREEN);
+        print_color("OK!", color = .GREEN);
+        print_color("\n", color = .RED);
     }
 }
 
@@ -75,7 +76,15 @@ check_register :: (gb: *Gameboy, reg: Operation_Target, val: u8, builder: *Strin
                 print_to_builder(builder, "> Register % is %. Expected %.", reg, gb.cpu.a, val);
             }
             return ok;
-        };
+        }
+        case .B; {
+            ok := gb.cpu.b == val;
+            if !ok {
+                print_to_builder(builder, "> Register % is %. Expected %.", reg, gb.cpu.a, val);
+            }
+            return ok;
+
+        }
         case; {
             assert(false, "Register test not implemented");
             return false;
@@ -88,8 +97,10 @@ test_programs :: () {
 
     init(gb,, temp);
 
-    test_program("tests/add.jai", gb, .{ .A, 2 } );
-    test_program("tests/sub.jai", gb, .{ .A, 1 } );
-    test_program("tests/or.jai", gb,  .{ .A, 0b1110_1101 } );
-    test_program("tests/and.jai", gb, .{ .A, 0b1100_0000 } );
+    test_program("tests/add.jai", gb, .{ .B, 2 } );
+    test_program("tests/sub.jai", gb, .{ .B, 1 } );
+    test_program("tests/or.jai", gb,  .{ .B, 0b1110_1101 } );
+    test_program("tests/and.jai", gb, .{ .B, 0b1100_0000 } );
+    test_program("tests/if_001.jai", gb, .{ .B, 1 } );
+    test_program("tests/if_002.jai", gb, .{ .B, 2 } );
 }

@@ -1,13 +1,12 @@
 #run build_and_output_rom();
 
 build_and_output_rom :: () {
-    cart := build_cart("tests/sub.jai", verbose = true);
+    cart := build_cart("tests/if_001.jai", verbose = true);
 
     filename := "output_rom.gb";
     write_entire_file(filename, cart.contents.data, cart.contents.count);
     log("Wrote %", filename);
 }
-
 
 
 #load "codegen.jai";
