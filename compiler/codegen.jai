@@ -42,13 +42,8 @@ gather :: (msg: *Message_Typechecked, procedures: *[..]*Code_Procedure_Header) {
             case .PROCEDURE_HEADER; {
                 array_add(procedures, cast(*Code_Procedure_Header) expr);
             }
-
             case; {
-                if expr.enclosing_load == null { 
-                    // log_error("Unsupported expression: %. Line %", expr.kind, expr.l0);
-                } else { 
-                    // compiler_report(expr.enclosing_load.fully_pathed_filename, expr.l0, expr.c0, tprint("Unsupported expr: %", expr.kind));
-                }
+                // We don't care about the rest. yet!
             }
         }
     }
@@ -233,7 +228,6 @@ compile_statement :: (node: *Code_Node, procedure: *Compiled_Procedure) -> bool 
                 case; {
                     log_error("Unhandled binary operator statement %", operator_to_string2(xx op));
                     return false;
-
                 }
             };
         }
