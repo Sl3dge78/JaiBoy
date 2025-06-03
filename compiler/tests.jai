@@ -13,8 +13,10 @@
 }
 
 test_load_gen :: () {
-    r := load_instruction(.A, .IMM_8);
-    assert(load_instruction(.A, .IMM_8) == 0x3E);
+    assert(load_imm8(.A) == 0x3E);
+    assert(load_imm8(.B) == 0x06);
+    assert(load_imm8(.C) == 0x0E);
+    assert(load_imm8(.D) == 0x16);
 }
 
 run_program :: (path: string, gb: *Gameboy, builder: *String_Builder) -> bool {
@@ -64,11 +66,11 @@ test_program :: (path: string, gb: *Gameboy, verifs: ..CPU_Verification) {
 }
 
 CPU_Verification :: struct {
-    reg: Operation_Target;
+    reg: Register;
     val : u8;
 }
 
-check_register :: (gb: *Gameboy, reg: Operation_Target, val: u8, builder: *String_Builder) -> bool{
+check_register :: (gb: *Gameboy, reg: Register, val: u8, builder: *String_Builder) -> bool{
     if reg == {
         case .A; {
             ok := gb.cpu.a == val;
@@ -83,7 +85,13 @@ check_register :: (gb: *Gameboy, reg: Operation_Target, val: u8, builder: *Strin
                 print_to_builder(builder, "> Register % is %. Expected %.", reg, gb.cpu.a, val);
             }
             return ok;
-
+        }
+        case .C; {
+            ok := gb.cpu.c == val;
+            if !ok {
+                print_to_builder(builder, "> Register % is %. Expected %.", reg, gb.cpu.a, val);
+            }
+            return ok;
         }
         case; {
             assert(false, "Register test not implemented");
@@ -97,10 +105,17 @@ test_programs :: () {
 
     init(gb,, temp);
 
-    test_program("tests/add.jai", gb, .{ .B, 2 } );
-    test_program("tests/sub.jai", gb, .{ .B, 1 } );
-    test_program("tests/or.jai", gb,  .{ .B, 0b1110_1101 } );
-    test_program("tests/and.jai", gb, .{ .B, 0b1100_0000 } );
-    test_program("tests/if_001.jai", gb, .{ .B, 1 } );
-    test_program("tests/if_002.jai", gb, .{ .B, 2 } );
+    test_program("tests/add.jai", gb, .{ .A, 2 } );
+    test_program("tests/sub.jai", gb, .{ .A, 1 } );
+    test_program("tests/or.jai", gb,  .{ .A, 0b1110_1101 } );
+    test_program("tests/and.jai", gb, .{ .A, 0b1100_0000 } );
+    test_program("tests/if_001.jai", gb, .{ .A, 1 } );
+    test_program("tests/if_002.jai", gb, .{ .A, 2 } );
+    test_program("tests/add_equals.jai", gb, .{ .A, 3 } );
+    test_program("tests/sub_equals.jai", gb, .{ .A, 1 } );
+    test_program("tests/or_equals.jai", gb, .{ .A, 0b1111_1101 } );
+    test_program("tests/and_equals.jai", gb, .{ .A, 0b1000_0000 } );
+    test_program("tests/xor_equals.jai", gb, .{ .A, 0b1000_1111 } );
+    test_program("tests/if_003.jai", gb, .{ .C, 69 } );
+    test_program("tests/if_004.jai", gb, .{ .C, 69 } );
 }

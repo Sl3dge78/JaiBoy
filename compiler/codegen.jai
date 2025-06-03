@@ -1,4 +1,10 @@
+global_verbose := false;
+
 build_cart :: (file: string, verbose := false) -> MBC1 {
+    global_verbose = verbose;
+    if global_verbose {
+        log("%", file);
+    }
     w := compiler_create_workspace();
     
     options := get_build_options();
@@ -26,7 +32,7 @@ build_cart :: (file: string, verbose := false) -> MBC1 {
     }
     compiler_end_intercept(w);
     set_build_options_dc(.{do_output = false});
-    ok, cart := generate_assembly(procedures, verbose);
+    ok, cart := generate_assembly(procedures);
     assert(ok);
     return cart;
 }
@@ -50,19 +56,28 @@ gather :: (msg: *Message_Typechecked, procedures: *[..]*Code_Procedure_Header) {
 }
 
 
-generate_assembly :: (procedures: [..]*Code_Procedure_Header, verbose := false) -> bool, MBC1 {
+generate_assembly :: (procedures: [..]*Code_Procedure_Header) -> bool, MBC1 {
     compiled : [..]Compiled_Procedure;
+    errored := false;
     for procedures {
-        ok, proc := generate_procedure(it);
-        if !ok {
-            log_error("Error compiling procedure. Exiting.");
-            return false, .{};
+        proc := generate_procedure(it);
+
+        if proc.errors.count > 0 {
+            errored = true;
+            for proc.errors {
+                loc := it.location;
+                compiler_report(loc.enclosing_load.fully_pathed_filename, loc.l0, loc.c0, it.message); 
+            }
+            continue;
         }
         array_add(*compiled, proc);
-        if verbose {
+        if global_verbose {
             log("%:", it.name);
-            dump_procedure(proc);
+            disassemble_procedure(proc);
         }
+    }
+    if errored { 
+        return false, .{};
     }
     cart := output_rom(compiled);
     return true, cart;
@@ -83,50 +98,17 @@ output_rom :: (compiled: []Compiled_Procedure) -> MBC1 {
 
 }
 
-dump_procedure :: (proc: Compiled_Procedure) {
-    i := 0;
-    while i < proc.bytes.count {
-
-        builder : String_Builder;
-        op := OPCODE_DESC_TABLE[proc.bytes[i]];
-        
-        // Addr
-        print_to_builder(*builder, "0x% ", formatInt(i, 16, 4));
-
-        // Bytes
-        print_to_builder(*builder, "% ", formatInt(proc.bytes[i], 16, 2));
-        for 1..op.bytes - 1 {
-            print_to_builder(*builder, "% ", formatInt(proc.bytes[i + it], 16, 2));
-        }
-        while builder_string_length(*builder) < 20 {
-            append(*builder, " ");
-        }
-
-        // Desc
-        print_to_builder(*builder, "%", op.desc);
-        while builder_string_length(*builder) < 32 {
-            append(*builder, " ");
-        }
-
-        // Operands
-        i2 := op.bytes - 1;
-        while (i2 >= 1) {
-            print_to_builder(*builder, "%", formatInt(proc.bytes[i + i2], 16, 2));
-            i2 -= 1;
-        }
-
-        builder_string := builder_to_string(*builder,, temp);
-        log("%", builder_string);
-        i += op.bytes;
-    }
+disassemble_procedure :: (proc: Compiled_Procedure) {
+    disassemble_bytes(..proc.bytes);
 }
 
-generate_procedure :: (proc: *Code_Procedure_Header) -> bool, Compiled_Procedure {
+generate_procedure :: (proc: *Code_Procedure_Header) -> Compiled_Procedure {
     result: Compiled_Procedure;
     assert(proc.body_or_null != null, "Procedure didn't compile?");
     body := proc.body_or_null;
-    if !compile_block(body.block, *result) {
-        return false, .{};
+    compile_block(*result, body.block);
+    if result.errors.count > 0 {
+        return result;
     }
 
     if proc.name == "main" {
@@ -134,175 +116,241 @@ generate_procedure :: (proc: *Code_Procedure_Header) -> bool, Compiled_Procedure
         output_bytes(*result, .HALT);
     }
 
-    return true, result;
+    return result;
 }
 
-compile_block :: (block: *Code_Block, procedure: *Compiled_Procedure) -> bool {
+compile_block :: (procedure: *Compiled_Procedure, node: *Code_Block) {
+    block := node;
     for block.members {
         push_member(procedure, it.name);
     }
 
     if block.block_type != .IMPERATIVE {
-        log_error("Unhandled block type: %", block.block_type);
-        return false;
+        error(tprint("Unhandled block type: %", block.block_type));
+        return;
     }
 
     for block.statements {
-        compile_statement(it, procedure);
+        compile_statement(procedure, it);
+        if procedure.errors.count > 0 then break;
     }
 
     for block.members {
         pop_member(procedure);
     }
-    return true;
-
 }
 
-compile_statement :: (node: *Code_Node, procedure: *Compiled_Procedure) -> bool {
+compile_statement :: (procedure: *Compiled_Procedure, node: *Code_Node) {
     if node.kind == {
         case .DECLARATION; {
             decl := cast(*Code_Declaration)node;
             if decl.type_inst != null {
                 if decl.type_inst.pointer_to != null {
-                    log_error("Pointers aren't implemented yet");
-                    return false;
+                    error("Pointers aren't implemented yet");
+                    return;
                 }
                 if decl.type_inst.array_element_type != null {
-                    log_error("Arrays aren't implemented yet");
-                    return false;
+                    error("Arrays aren't implemented yet");
+                    return;
                 }
                 ti := decl.type_inst.result;
                 if ti.type != .INTEGER {
-                    log_error("Only integers are supported");
-                    return false;
+                    error("Only integers are supported");
+                    return;
                 }
                 if ti.runtime_size > 1 {
-                    log_error("Only 8 bit integers are supported");
-                    return false;
+                    error("Only 8 bit integers are supported");
+                    return;
                 }
             }
-            if decl.expression == null {
-                log_error("I don't know what to do here");
-            } else {
-                target := find_member(procedure, decl.name);
-                if !compile_expression(decl.expression, procedure, target) { return false; }
+            if decl.expression != null {
+                target := member_location(procedure, decl.name);
+                compile_expression(procedure, decl.expression, target);
             }
 
-            return true;
+            return;
         }
-        case .IF; {
+        case .IF; { 
             code := node.(*Code_If);
             if code.if_flags != 0 {
-                log_error("Unhandled if %.", code.if_flags);
-                return false;
+                error(tprint("Unhandled if %.", code.if_flags));
+                return ;
             }
-            compile_expression(code.condition, procedure, .A);
-            output_bytes(procedure, .CP_D8, 0x1);
+            // If expects the result of the condition to be in .A
+            compile_condition(procedure, code.condition);
             then_jump := add_jump(procedure, .IF_FALSE); 
-            compile_block(code.then_block, procedure);
+            compile_block(procedure, code.then_block);
             else_jump : int = -1;  
             if code.else_block != null {
                 else_jump = add_jump(procedure, .ALWAYS);
             }
             patch_jump(then_jump, procedure);
-            compile_block(code.else_block, procedure);
+            compile_block(procedure, code.else_block);
             if code.else_block != null {
                 patch_jump(else_jump, procedure);
             }
 
-            return true;
+            return;
         }
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
             op : Operator_Type = xx bin_op.operator_type;
+            if bin_op.left.kind != .IDENT {
+                error(tprint("We expected an identifier to the left of a = operator, but we got a %", bin_op.left.kind));
+                return;
+            }
 
             if op == {
                 case #char "="; {
-                    if bin_op.left.kind != .IDENT {
-                        log_error("We expected an identifier to the left of a = operator, but we got a %", bin_op.left.kind);
-                        return false;
+                    target := member_location(procedure, bin_op.left.(*Code_Ident).name);
+                    compile_expression(procedure, bin_op.right, target);
+                }
+                // @TODO, keep target in A
+                case .PLUS_ASSIGN; #through;
+                case .MINUS_ASSIGN; #through;
+                case .BITWISE_AND_ASSIGN; #through;
+                case .BITWISE_OR_ASSIGN; #through;
+                case .BITWISE_XOR_ASSIGN; {
+                    get_instruction :: (op: Operator_Type) -> Arithmetic_Instruction {
+                        if op == {
+                            case .PLUS_ASSIGN; return .ADD;
+                            case .MINUS_ASSIGN; return .SUB;
+                            case .BITWISE_AND_ASSIGN; return .AND;
+                            case .BITWISE_OR_ASSIGN; return .OR;
+                            case .BITWISE_XOR_ASSIGN; return .XOR;
+                            case; unreachable();  return 0;
+                        }
                     }
-                    target := find_member(procedure, bin_op.left.(*Code_Ident).name);
-                    return compile_expression(bin_op.right, procedure, target);
+
+                    temp := push_temporary(procedure);
+                    defer pop_temporary(procedure, temp);
+                    compile_expression(procedure, bin_op.right, member_location(procedure, temp));
+
+                    move_member(procedure, bin_op.left.(*Code_Ident).name, .A);
+                    output_bytes(procedure, arithmetic_instruction(get_instruction(op), member_location(procedure, temp)));
                 }
                 case; {
-                    log_error("Unhandled binary operator statement %", operator_to_string2(xx op));
-                    return false;
+                    error(tprint("Unhandled binary operator statement %", operator_to_string2(xx op)));
+                    return;
                 }
             };
         }
         case; {
-            log_error("Unhandled statement kind: %", node.kind);
-            return false;
+            error(tprint("Unhandled statement kind: %", node.kind));
+            return;
         }
     }
-
 }
 
-compile_expression :: (node: *Code_Node, procedure: *Compiled_Procedure, destination_register : Operation_Target = .A) -> bool {
+compile_expression :: (procedure: *Compiled_Procedure, node: *Code_Node, destination_register : Register = .A) {
     if node.kind == {
         case .LITERAL; {
             lit := node.(*Code_Literal);
             if lit.value_type == {
                 case .NUMBER; {
                     if lit.value_flags & .FLOAT { 
-                        log_error("Floats aren't supported");
-                        return false;
+                        error("Floats aren't supported");
+                        return;
                     }
                     if lit._u64 > 0xFF {
-                        log_error("u16s aren't supported"); // @TODO
-                        return false;
+                        error("u16s aren't supported"); // @TODO
+                        return;
                     }
-                    output_bytes(procedure, load_instruction(destination_register, .IMM_8));
-                    output_bytes(procedure, lit._u64.(u8));
-                    return true;
+                    output_bytes(procedure, load_imm8(destination_register), lit._u64.(u8));
+                    return;
                 }
                 case .BOOLEAN;{
-                    output_bytes(procedure, load_instruction(destination_register, .IMM_8));
-                    output_bytes(procedure, lit._u64.(u8));
-                    return true;
+                    output_bytes(procedure, load_imm8(destination_register), lit._u64.(u8));
+                    return;
                 }
                 case; {
-                    log_error("Unhandled literal %", lit.value_type);
-                    return false;
+                    error(tprint("Unhandled literal %", lit.value_type));
+                    return;
                 }
             };
         }
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
             op : Operator_Type = xx bin_op.operator_type;
+            // @TODO: Find a way to make sure left gets A
+            left := push_temporary(procedure); 
+            defer pop_temporary(procedure, left);
+            right := push_temporary(procedure);
+            defer pop_temporary(procedure, right);
+            compile_expression(procedure, bin_op.right, member_location(procedure, right));
+            compile_expression(procedure, bin_op.left, member_location(procedure,left)); 
 
+            instr: Arithmetic_Instruction;
             if op == {
-                case #char "+"; #through; 
-                case #char "-"; #through; 
-                case #char "&"; #through; 
-                case #char "|"; {
-                    compile_expression(bin_op.left, procedure, .A);
-                    compile_expression(bin_op.right, procedure, .B);
-                    op_byte : u8;
-                    if op == {
-                        case #char "+"; op_byte = 0x80; // ADD A, B
-                        case #char "-"; op_byte = 0x90; // SUB B
-                        case #char "&"; op_byte = 0xA0; // AND B
-                        case #char "|"; op_byte = 0xB0; // OR  B
-                        case; return false;
-                    }
-                    output_bytes(procedure, op_byte); 
+                case #char "+"; instr = .ADD;
+                case #char "-"; {
+                    instr = .SUB;
+                    move_member(procedure, left, .A);
                 }
+                case #char "&"; instr = .AND;
+                case #char "|"; instr = .OR;
                 case; { 
-                    log_error("Unhandled binary operator expression %", operator_to_string2(op)); 
-                    return false;
+                    error(tprint("Unhandled binary operator expression '%'", operator_to_string2(op))); 
+                    return;
                 }
             }
-            if destination_register != .A {
-                output_bytes(procedure, load_instruction(destination_register, .A));
+
+            if member_location(procedure, left) == .A {
+                output_bytes(procedure, arithmetic_instruction(.CP, member_location(procedure, right))); 
+            } else if member_location(procedure, right) == .A {
+                output_bytes(procedure, arithmetic_instruction(.CP, member_location(procedure, right))); 
+            } else {
+                move_member(procedure, left, .A);
+                output_bytes(procedure, arithmetic_instruction(.CP, member_location(procedure, right))); 
             }
-            return true;
+        }
+        case .IDENT; {
+            ident := node.(*Code_Ident);
+            move_member(procedure, ident.name, destination_register);
         }
         case; {
-            log_error("Unhandled expression kind: %", node.kind);
-            return false;
+            error(tprint("Unhandled expression kind: %", node.kind));
+            return;
         }
+    }
+}
+
+compile_condition :: (procedure: Compiled_Procedure, node: *Code_Node) {
+    if node.kind == {
+        case .BINARY_OPERATOR; {
+            bin_op := node.(*Code_Binary_Operator);
+            op : Operator_Type = xx bin_op.operator_type;
+            // @TODO: Find a way to make sure left gets A
+            left := push_temporary(procedure); 
+            defer pop_temporary(procedure, left);
+            right := push_temporary(procedure);
+            defer pop_temporary(procedure, right);
+            compile_expression(procedure, bin_op.right, member_location(procedure, right));
+            compile_expression(procedure, bin_op.left, member_location(procedure,left)); 
+
+            instr: Arithmetic_Instruction;
+            if op == {
+                case .IS_EQUAL; instr = .CP;
+                case; { 
+                    error(tprint("Unhandled binary operator expression '%'", operator_to_string2(op))); 
+                    return;
+                }
+            }
+
+            if member_location(procedure, left) == .A {
+                output_bytes(procedure, arithmetic_instruction(.CP, member_location(procedure, right))); 
+            } else if member_location(procedure, right) == .A {
+                output_bytes(procedure, arithmetic_instruction(.CP, member_location(procedure, right))); 
+            } else {
+                move_member(procedure, left, .A);
+                output_bytes(procedure, arithmetic_instruction(.CP, member_location(procedure, right))); 
+            }
+        }
+        case; {
+            error(tprint("Unhandled condition expression kind: %", node.kind));
+            return;
+        }
+
     }
 }
 
@@ -314,87 +362,6 @@ operator_to_string2 :: (op: Operator_Type) -> string #expand {
     }
 }
 
-output_bytes :: (procedure: *Compiled_Procedure, bytes: ..u8) {
-    array_add(*procedure.bytes, ..bytes);
-}
-
-output_bytes :: (procedure: *Compiled_Procedure, instr: Instruction_Kind, bytes : ..u8) {
-    array_add(*procedure.bytes, xx instr);
-    array_add(*procedure.bytes, ..bytes);
-}
-
-Jump_Kind :: enum {
-    IF_FALSE;
-    ALWAYS;
-}
-
-
-add_jump :: (procedure: *Compiled_Procedure, kind: Jump_Kind) -> int {
-    if #complete kind == {
-        case .IF_FALSE; {
-            addr := procedure.bytes.count;
-            output_bytes(procedure, .JR_NZ_REL);
-            output_bytes(procedure, 0x00);
-            return addr;
-        }
-        case .ALWAYS; {
-            addr := procedure.bytes.count;
-            output_bytes(procedure, .JR_REL);
-            output_bytes(procedure, 0x00);
-            return addr;
-        }
-    };
-}
-
-patch_jump :: (jump_addr: int, procedure: *Compiled_Procedure) {
-    current_addr := procedure.bytes.count;
-    end_of_jump := jump_addr + 2;
-    distance := current_addr - end_of_jump;
-    assert(distance <= 127, "Long jumps arent supported yet");
-    procedure.bytes[jump_addr + 1] = cast,no_check(u8)(distance.(s8));
-}
-
-push_member :: (using procedure: *Compiled_Procedure, name: string) {
-    ok, pos := find_next_available_register(procedure);
-    assert(ok, "Too many members in procedure.");
-    array_add(*members, .{name, pos});
-}
-
-pop_member :: (using procedure: *Compiled_Procedure) {
-    members.count -= 1;
-}
-
-find_member :: (using procedure: *Compiled_Procedure, name: string) -> Operation_Target {
-    for members {
-        if it.name == name then return it.register;
-    }
-    assert(false, "Member % couldn't be found.", name);
-    return .A;
-}
-
-find_next_available_register :: (using procedure: *Compiled_Procedure) -> bool, Operation_Target {
-    for r: 0..5 {
-        for members {
-            if it.register == xx r then continue r;
-        }
-
-        return true, xx r;
-    }
-    return false, 0;
-}
-
-Member :: struct {
-    name: string;
-    register: Operation_Target;
-}
-
-
-Compiled_Procedure :: struct {
-    base_address : u16;
-    bytes: [..]u8;
-    members: [..] Member;
-}
-
 Instruction_Kind :: enum u8 {
     NOP :: 0x0;
     JR_REL :: 0x18;
@@ -404,28 +371,42 @@ Instruction_Kind :: enum u8 {
     CP_D8 :: 0xFE;
 }
 
-load_instruction :: (dst: Operation_Target, src: Operation_Target) -> u8 {
-    if src <= .A {
-        assert(!(src == .HL_INDIRECT && src == .HL_INDIRECT), "This is HALT");
-        assert(dst <= .A);
-        return 0x40 + (dst.(u8) * 8) + src.(u8);
-    } 
-    if src == {
-        case .IMM_8; {
-            lo : u8 = 0x6 + ((dst.(u8) % 2) * 0x8);
-            hi : u8 = (dst.(u8) / 2) << 4;
-            return lo | hi;
-        }
-        case; {
-            assert(false, "Unsupported");
-            return 0x0;
-        }
-    }
-    assert(false, "Unsupported");
-    return 0x0;
+load_instruction :: (dst: Register, src: Register) -> u8 {
+    assert(!(src == .HL_INDIRECT && src == .HL_INDIRECT), "This is HALT");
+    assert(dst <= .A);
+    assert(dst != src, "This is a dumb and useless operation");
+    return 0x40 + (dst.(u8) * 8) + src.(u8);
 }
 
-Operation_Target :: enum {
+load_imm8 :: (dst: Register) -> u8 {
+    lo : u8 = 0x6 + ((dst.(u8) % 2) * 0x8);
+    hi : u8 = (dst.(u8) / 2) << 4;
+    return lo | hi;
+}
+
+Arithmetic_Instruction :: enum u8 {
+    ADD :: 0x80;
+    ADC :: 0x88;
+    SUB :: 0x90;
+    SBC :: 0x98;
+    AND :: 0xA0;
+    XOR :: 0xA8;
+    OR  :: 0xB0;
+    CP  :: 0xB8;
+}
+
+arithmetic_instruction :: (kind: Arithmetic_Instruction, src: Register) -> u8 {
+    return kind.(u8) + src.(u8);
+}
+
+swap_instruction :: (dst: Register) -> [2]u8 {
+    result : [2]u8;
+    result[0] = 0xCB;
+    result[1] = 0x30 + dst.(u8);
+    return result;
+}
+
+Register :: enum {
     B :: 0;
     C :: 1;
     D :: 2;
@@ -434,16 +415,17 @@ Operation_Target :: enum {
     L :: 5;
     HL_INDIRECT :: 6;
     A :: 7;
-    BC;
-    DE;
-    HL;
-    IMM_8;
-    IMM_16;
-    BC_INDIRECT;
-    DE_INDIRECT;
-    HL_PLUS_INDIRECT;
-    HL_MINUS_INDIRECT;
 }
+
+register_preference :: Register.[
+    .A,
+    .B,
+    .C,
+    .D,
+    .E,
+    .H,
+    .L
+];
 
 Cart_Header :: struct {
     blank: [0x100]u8;
@@ -468,4 +450,10 @@ MBC1 :: struct {
     contents: [0x8000]u8;
 }
 
+unreachable :: () #expand {
+    assert(false, "Unreachable");
+    return;
+}
+
 #load "../common/opcodes.jai";
+#load "procedure.jai";

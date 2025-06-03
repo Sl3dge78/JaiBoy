@@ -7,7 +7,7 @@ build :: () {
     w := Compiler.compiler_create_workspace();
     
     options := Compiler.get_build_options();
-    options.output_path = "bin";
+    options.output_path = "../bin";
     options.output_executable_name = "JaiBoy";
     options.additional_linker_arguments = .["/lib/libm.so"];
     Compiler.set_optimization(*options, .DEBUG);

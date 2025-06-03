@@ -19,7 +19,11 @@ bin :: (val: u16) -> FormatInt #expand {
 }
 
 init_debug :: () {
-    debug_window = SDL_CreateWindow("Debug",500, 500, SDL_WINDOW_BORDERLESS);
+    debug_window = SDL_CreateWindow("Debug", 500, 500, 0);
+    x : s32 = ---;
+    y : s32 = ---;
+    SDL_GetWindowPosition(debug_window, *x, *y);
+    SDL_SetWindowPosition(debug_window, x - 500, y);
     state = init_immediate(debug_window);
     log("init");
 }

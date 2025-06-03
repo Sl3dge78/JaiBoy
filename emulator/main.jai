@@ -1,12 +1,12 @@
 #import "Basic";
-#import "jai-sdl3";
 #import "Math";
 #import "stb_image";
 #import "System";
-File :: #import "File";
+#import "File";
 ImGui :: #import "ImGui";
 
 #load "../common/gb.jai";
+#load "debug.jai";
 
 #load "imgui_render.jai";
 
