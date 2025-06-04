@@ -71,33 +71,23 @@ CPU_Verification :: struct {
 }
 
 check_register :: (gb: *Gameboy, reg: Register, val: u8, builder: *String_Builder) -> bool{
+    reg_val : u8;
     if reg == {
-        case .A; {
-            ok := gb.cpu.a == val;
-            if !ok {
-                print_to_builder(builder, "> Register % is %. Expected %.", reg, gb.cpu.a, val);
-            }
-            return ok;
-        }
-        case .B; {
-            ok := gb.cpu.b == val;
-            if !ok {
-                print_to_builder(builder, "> Register % is %. Expected %.", reg, gb.cpu.a, val);
-            }
-            return ok;
-        }
-        case .C; {
-            ok := gb.cpu.c == val;
-            if !ok {
-                print_to_builder(builder, "> Register % is %. Expected %.", reg, gb.cpu.a, val);
-            }
-            return ok;
-        }
+        case .A; reg_val = gb.cpu.a;
+        case .B; reg_val = gb.cpu.b;
+        case .C; reg_val = gb.cpu.c;
         case; {
             assert(false, "Register test not implemented");
             return false;
         }
     }
+    ok := reg_val == val;
+    if !ok {
+        print_to_builder(builder, "> Register % is %. Expected %.\n", reg, reg_val, val);
+        print_to_builder(builder, "Here's the state of the cpu: \n");
+        print_to_builder(builder, "a: %, b: %, c: %, d: %, e: %", gb.cpu.a, gb.cpu.b, gb.cpu.c, gb.cpu.d, gb.cpu.e);
+    }
+    return ok;
 }
 
 test_programs :: () {
@@ -117,5 +107,10 @@ test_programs :: () {
     test_program("tests/and_equals.jai", gb, .{ .A, 0b1000_0000 } );
     test_program("tests/xor_equals.jai", gb, .{ .A, 0b1000_1111 } );
     test_program("tests/if_003.jai", gb, .{ .C, 69 } );
-    test_program("tests/if_004.jai", gb, .{ .C, 69 } );
+    test_program("tests/if_004.jai", gb, .{ .A, 2 } );
+    test_program("tests/call_001.jai", gb, .{ .A, 69 } );
+    test_program("tests/call_002.jai", gb);
+    test_program("tests/call_003.jai", gb, .{ .A, 4 });
+    test_program("tests/call_004.jai", gb, .{ .A, 122 });
+    test_program("tests/call_005.jai", gb, .{ .A, 133 });
 }
