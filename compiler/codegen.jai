@@ -1,5 +1,8 @@
 global_verbose := false;
 
+#add_context current_procedure: *Compiled_Procedure;
+#add_context current_node: *Code_Node;
+
 build_cart :: (file: string, verbose := false) -> MBC1 {
     global_verbose = verbose;
     if global_verbose {
@@ -73,7 +76,9 @@ generate_assembly :: (procedures: [..]*Code_Procedure_Header) -> bool, MBC1 {
         array_add(*compiled, proc);
         if global_verbose {
             log("%:", it.name);
-            disassemble_procedure(proc);
+            builder: String_Builder;
+            disassemble_procedure(*builder, proc);
+            log("%", builder_to_string(*builder));
         }
     }
     if errored { 
@@ -98,15 +103,15 @@ output_rom :: (compiled: []Compiled_Procedure) -> MBC1 {
 
 }
 
-disassemble_procedure :: (proc: Compiled_Procedure) {
-    disassemble_bytes(..proc.bytes);
+disassemble_procedure :: (builder: *String_Builder, proc: Compiled_Procedure) {
+    disassemble_bytes(builder, ..proc.bytes);
 }
 
 generate_procedure :: (proc: *Code_Procedure_Header) -> Compiled_Procedure {
     result: Compiled_Procedure;
     assert(proc.body_or_null != null, "Procedure didn't compile?");
     body := proc.body_or_null;
-    compile_block(*result, body.block);
+    compile_block(,, current_procedure = *result, current_node = body.block);
     if result.errors.count > 0 {
         return result;
     }
@@ -119,10 +124,10 @@ generate_procedure :: (proc: *Code_Procedure_Header) -> Compiled_Procedure {
     return result;
 }
 
-compile_block :: (procedure: *Compiled_Procedure, node: *Code_Block) {
-    block := node;
+compile_block :: () {
+    block := context.current_node;
     for block.members {
-        push_member(procedure, it.name);
+        push_member(it.name);
     }
 
     if block.block_type != .IMPERATIVE {
@@ -131,16 +136,16 @@ compile_block :: (procedure: *Compiled_Procedure, node: *Code_Block) {
     }
 
     for block.statements {
-        compile_statement(procedure, it);
-        if procedure.errors.count > 0 then break;
+        compile_statement(,, current_node = it);
+        if context.current_procedure.errors.count > 0 then break;
     }
 
     for block.members {
-        pop_member(procedure);
+        pop_member();
     }
 }
 
-compile_statement :: (procedure: *Compiled_Procedure, node: *Code_Node) {
+compile_statement :: () {
     if node.kind == {
         case .DECLARATION; {
             decl := cast(*Code_Declaration)node;
@@ -272,20 +277,14 @@ compile_expression :: (procedure: *Compiled_Procedure, node: *Code_Node, destina
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
             op : Operator_Type = xx bin_op.operator_type;
-            // @TODO: Find a way to make sure left gets A
-            left := push_temporary(procedure); 
-            defer pop_temporary(procedure, left);
-            right := push_temporary(procedure);
-            defer pop_temporary(procedure, right);
-            compile_expression(procedure, bin_op.right, member_location(procedure, right));
-            compile_expression(procedure, bin_op.left, member_location(procedure,left)); 
+            compile_expression(procedure, bin_op.right, .B);
+            compile_expression(procedure, bin_op.left, .A); 
 
             instr: Arithmetic_Instruction;
             if op == {
                 case #char "+"; instr = .ADD;
                 case #char "-"; {
                     instr = .SUB;
-                    move_member(procedure, left, .A);
                 }
                 case #char "&"; instr = .AND;
                 case #char "|"; instr = .OR;
@@ -294,15 +293,7 @@ compile_expression :: (procedure: *Compiled_Procedure, node: *Code_Node, destina
                     return;
                 }
             }
-
-            if member_location(procedure, left) == .A {
-                output_bytes(procedure, arithmetic_instruction(.CP, member_location(procedure, right))); 
-            } else if member_location(procedure, right) == .A {
-                output_bytes(procedure, arithmetic_instruction(.CP, member_location(procedure, right))); 
-            } else {
-                move_member(procedure, left, .A);
-                output_bytes(procedure, arithmetic_instruction(.CP, member_location(procedure, right))); 
-            }
+            output_bytes(procedure, arithmetic_instruction(instr, .B)); 
         }
         case .IDENT; {
             ident := node.(*Code_Ident);
@@ -315,18 +306,13 @@ compile_expression :: (procedure: *Compiled_Procedure, node: *Code_Node, destina
     }
 }
 
-compile_condition :: (procedure: Compiled_Procedure, node: *Code_Node) {
+compile_condition :: (procedure: *Compiled_Procedure, node: *Code_Node) {
     if node.kind == {
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
             op : Operator_Type = xx bin_op.operator_type;
-            // @TODO: Find a way to make sure left gets A
-            left := push_temporary(procedure); 
-            defer pop_temporary(procedure, left);
-            right := push_temporary(procedure);
-            defer pop_temporary(procedure, right);
-            compile_expression(procedure, bin_op.right, member_location(procedure, right));
-            compile_expression(procedure, bin_op.left, member_location(procedure,left)); 
+            compile_expression(procedure, bin_op.right, .B);
+            compile_expression(procedure, bin_op.left, .A); 
 
             instr: Arithmetic_Instruction;
             if op == {
@@ -337,14 +323,12 @@ compile_condition :: (procedure: Compiled_Procedure, node: *Code_Node) {
                 }
             }
 
-            if member_location(procedure, left) == .A {
-                output_bytes(procedure, arithmetic_instruction(.CP, member_location(procedure, right))); 
-            } else if member_location(procedure, right) == .A {
-                output_bytes(procedure, arithmetic_instruction(.CP, member_location(procedure, right))); 
-            } else {
-                move_member(procedure, left, .A);
-                output_bytes(procedure, arithmetic_instruction(.CP, member_location(procedure, right))); 
-            }
+            output_bytes(procedure, arithmetic_instruction(instr, .B)); 
+        }
+        case .IDENT; #through;
+        case .LITERAL; {
+            compile_expression(procedure, node);
+            output_bytes(procedure, .CP_D8, 0x1);
         }
         case; {
             error(tprint("Unhandled condition expression kind: %", node.kind));

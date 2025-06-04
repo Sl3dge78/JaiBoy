@@ -18,75 +18,72 @@ Compiled_Procedure :: struct {
 }
 
 
-output_bytes :: (procedure: *Compiled_Procedure, bytes: ..u8, loc := #caller_location) {
-    array_add(*procedure.bytes, ..bytes);
-    if global_verbose { 
-        print("%:%:%:\t", loc.fully_pathed_filename, loc.line_number, loc.character_number);
-        disassemble_bytes(bytes);
-    }
+output_bytes :: (procedure: *Compiled_Procedure, bytes: ..u8, loc := #caller_location) #expand {
+    node := `node;
+    output_bytes(procedure, bytes, loc); 
 }
 
-output_bytes :: (procedure: *Compiled_Procedure, bytes: []u8, loc := #caller_location) {
+output_bytes :: (procedure: *Compiled_Procedure, instr: Instruction_Kind, bytes : ..u8, loc := #caller_location) #expand {
+    node := `node;
+    all : [..]u8;
+    all.allocator = temp;
+    array_add(*all, xx instr);
+    array_add(*all, ..bytes);
+    output_bytes(procedure, all, loc);
+}
+
+output_bytes :: (procedure: *Compiled_Procedure, bytes: []u8, loc := #caller_location) #expand {
     array_add(*procedure.bytes, ..bytes);
     if global_verbose {
-        print("%:%:%:\t", loc.fully_pathed_filename, loc.line_number, loc.character_number);
-        disassemble_bytes(bytes);
+        builder: String_Builder;
+        print_to_builder(*builder, "%:%:%:\t", loc.fully_pathed_filename, loc.line_number, loc.character_number);
+        disassemble_bytes(*builder, bytes);
+        print_to_builder(*builder, "\t; ");
+        print_expression(*builder, `node);
+        log("%", builder_to_string(*builder));
     }
 }
 
-output_bytes :: (procedure: *Compiled_Procedure, instr: Instruction_Kind, bytes : ..u8, loc := #caller_location) {
-    nb := procedure.bytes.count;
-    array_add(*procedure.bytes, xx instr);
-    array_add(*procedure.bytes, ..bytes);
-    if global_verbose { 
-        b := procedure.bytes;
-        b.data += nb;
-        b.count -= nb;
-        print("%:%:%:\t", loc.fully_pathed_filename, loc.line_number, loc.character_number);
-        disassemble_bytes(b);
-    }
+
+disassemble_bytes :: (builder: *String_Builder, bytes: ..u8) {
+    disassemble_bytes(builder, bytes);
 }
 
-disassemble_bytes :: (bytes: ..u8) {
-    disassemble_bytes(bytes);
-}
-
-disassemble_bytes :: (bytes: []u8) {
+disassemble_bytes :: (builder: *String_Builder, bytes: []u8) {
     i := 0;
     while i < bytes.count {
-        builder : String_Builder;
         op := OPCODE_DESC_TABLE[bytes[i]];
         
         // Addr
-        print_to_builder(*builder, "0x% ", formatInt(i, 16, 4));
+        print_to_builder(builder, "0x% ", formatInt(i, 16, 4));
 
         // Bytes
-        print_to_builder(*builder, "% ", formatInt(bytes[i], 16, 2));
+        print_to_builder(builder, "% ", formatInt(bytes[i], 16, 2));
         if (i + (op.bytes-1)) > bytes.count - 1 {
             assert(false, "Malformed instruction: % (%)", formatInt(bytes[i], 16), op.desc);
             return;
         }
         for 1..op.bytes - 1 {
-            print_to_builder(*builder, "% ", formatInt(bytes[i + it], 16, 2));
+            print_to_builder(builder, "% ", formatInt(bytes[i + it], 16, 2));
         }
-        while builder_string_length(*builder) < 20 {
-            append(*builder, " ");
+        while builder_string_length(builder) < 20 {
+            append(builder, " ");
         }
 
         // Desc
-        print_to_builder(*builder, "%", op.desc);
-        while builder_string_length(*builder) < 32 {
-            append(*builder, " ");
+        print_to_builder(builder, "%", op.desc);
+        while builder_string_length(builder) < 32 {
+            append(builder, " ");
         }
 
         // Operands
         i2 := op.bytes - 1;
         while (i2 >= 1) {
-            print_to_builder(*builder, "%", formatInt(bytes[i + i2], 16, 2));
+            print_to_builder(builder, "%", formatInt(bytes[i + i2], 16, 2));
             i2 -= 1;
         }
 
-        builder_string := builder_to_string(*builder,, temp);
+        builder_string := builder_to_string(builder,, temp);
         log("%", builder_string);
         i += op.bytes;
     }
