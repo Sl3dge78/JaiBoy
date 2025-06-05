@@ -42,7 +42,7 @@ run_program :: (path: string, gb: *Gameboy, builder: *String_Builder) -> bool {
     return true;
 }
 
-test_program :: (path: string, gb: *Gameboy, verifs: ..CPU_Verification) {
+test_program :: (path: string, gb: *Gameboy, verifs: ..Verification) {
     builder : String_Builder;
     if !run_program(path, gb, *builder) {
         print_color("Failed!\n", color = .RED);
@@ -52,8 +52,17 @@ test_program :: (path: string, gb: *Gameboy, verifs: ..CPU_Verification) {
 
     success := true;
     for verifs {
-        if !check_register(gb, it.reg, it.val, *builder) {
-            success = false;
+        if it.kind == {
+            case .CPU; {
+                if !check_register(gb, it.register, it.val, *builder) {
+                    success = false;
+                }
+            }
+            case .ADDRESS; {
+                if !check_address(gb, it.address, it.val, *builder) {
+                    success = false;
+                }
+            }
         }
     }
     if !success {
@@ -65,9 +74,24 @@ test_program :: (path: string, gb: *Gameboy, verifs: ..CPU_Verification) {
     }
 }
 
-CPU_Verification :: struct {
-    reg: Register;
+Verification :: struct {
+    kind : enum {
+        CPU;
+        ADDRESS;
+    };
+    union {
+        register: Register;
+        address: u16;
+    }
     val : u8;
+}
+
+cpu :: (reg: Register, val: u8) -> Verification {
+    return .{ kind = .CPU, register = reg, val = val };
+}
+
+ram :: (addr: u16, val: u8) -> Verification {
+    return .{ kind = .ADDRESS, address = addr, val = val };
 }
 
 check_register :: (gb: *Gameboy, reg: Register, val: u8, builder: *String_Builder) -> bool{
@@ -90,29 +114,40 @@ check_register :: (gb: *Gameboy, reg: Register, val: u8, builder: *String_Builde
     return ok;
 }
 
+check_address :: (gb: *Gameboy, address: u16, val: u8, builder: *String_Builder) -> bool {
+    address_val := gb.mem[address];
+    ok := address_val == val;
+    if !ok {
+        print_to_builder(builder, "> Memory % is %. Expected %.\n", address, address_val, val);
+    } 
+    return ok;
+
+}
+
 test_programs :: () {
     gb := New(Gameboy,, temp);
 
     init(gb,, temp);
 
-    test_program("tests/add.jai", gb, .{ .A, 2 } );
-    test_program("tests/sub.jai", gb, .{ .A, 1 } );
-    test_program("tests/or.jai", gb,  .{ .A, 0b1110_1101 } );
-    test_program("tests/and.jai", gb, .{ .A, 0b1100_0000 } );
-    test_program("tests/if_001.jai", gb, .{ .A, 1 } );
-    test_program("tests/if_002.jai", gb, .{ .B, 2 } );
-    test_program("tests/add_equals.jai", gb, .{ .A, 3 } );
-    test_program("tests/sub_equals.jai", gb, .{ .A, 1 } );
-    test_program("tests/or_equals.jai", gb, .{ .A, 0b1111_1101 } );
-    test_program("tests/and_equals.jai", gb, .{ .A, 0b1000_0000 } );
-    test_program("tests/xor_equals.jai", gb, .{ .A, 0b1000_1111 } );
-    test_program("tests/if_003.jai", gb, .{ .B, 69 } );
-    test_program("tests/if_004.jai", gb, .{ .A, 2 } );
-    test_program("tests/call_001.jai", gb, .{ .A, 69 } );
+    test_program("tests/add.jai", gb, cpu(.A, 2 } );
+    test_program("tests/sub.jai", gb, cpu(.A, 1 } );
+    test_program("tests/or.jai", gb,  cpu(.A, 0b1110_1101 } );
+    test_program("tests/and.jai", gb, cpu(.A, 0b1100_0000 } );
+    test_program("tests/if_001.jai", gb, cpu(.A, 1 } );
+    test_program("tests/if_002.jai", gb, cpu(.B, 2 } );
+    test_program("tests/add_equals.jai", gb, cpu(.A, 3 } );
+    test_program("tests/sub_equals.jai", gb, cpu(.A, 1 } );
+    test_program("tests/or_equals.jai", gb, cpu(.A, 0b1111_1101 } );
+    test_program("tests/and_equals.jai", gb, cpu(.A, 0b1000_0000 } );
+    test_program("tests/xor_equals.jai", gb, cpu(.A, 0b1000_1111 } );
+    test_program("tests/if_003.jai", gb, cpu(.B, 69 } );
+    test_program("tests/if_004.jai", gb, cpu(.A, 2 } );
+    test_program("tests/call_001.jai", gb, cpu( .A, 69 } );
     test_program("tests/call_002.jai", gb);
-    test_program("tests/call_003.jai", gb, .{ .A, 4 });
-    test_program("tests/call_004.jai", gb, .{ .A, 122 });
-    test_program("tests/call_005.jai", gb, .{ .A, 133 });
-    test_program("tests/if_005.jai", gb, .{ .A, 1 });
-    test_program("tests/if_006.jai", gb, .{ .A, 0 });
+    test_program("tests/call_003.jai", gb, .{ .CPU, register = .A, 4 });
+    test_program("tests/call_004.jai", gb, .{ .CPU, register = .A, 122 });
+    test_program("tests/call_005.jai", gb, .{ .CPU, register = .A, 133 });
+    test_program("tests/if_005.jai", gb, .{ .CPU, register = .A, 1 });
+    test_program("tests/if_006.jai", gb, .{ .CPU, register = .A, 0 });
+    test_program("tests/memory_write.jai", gb, .{ .CPU, register = .A, 0 });
 }
