@@ -1,7 +1,7 @@
 main :: () {
-    a := call1();
-    b := call2();
-    a += b;
+    result_a := call1();
+    result_b := call2();
+    result_a += result_b;
 }
 
 call1 :: () -> u8 {

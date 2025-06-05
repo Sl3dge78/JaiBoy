@@ -21,7 +21,7 @@ test_load_gen :: () {
 
 run_program :: (path: string, gb: *Gameboy, builder: *String_Builder) -> bool {
     print("Testing %\t\t", path);
-    cart := build_cart(path);
+    cart := build_cart(path,, log_level = .NORMAL);
 
     reset(gb);
 
@@ -100,17 +100,19 @@ test_programs :: () {
     test_program("tests/or.jai", gb,  .{ .A, 0b1110_1101 } );
     test_program("tests/and.jai", gb, .{ .A, 0b1100_0000 } );
     test_program("tests/if_001.jai", gb, .{ .A, 1 } );
-    test_program("tests/if_002.jai", gb, .{ .A, 2 } );
+    test_program("tests/if_002.jai", gb, .{ .B, 2 } );
     test_program("tests/add_equals.jai", gb, .{ .A, 3 } );
     test_program("tests/sub_equals.jai", gb, .{ .A, 1 } );
     test_program("tests/or_equals.jai", gb, .{ .A, 0b1111_1101 } );
     test_program("tests/and_equals.jai", gb, .{ .A, 0b1000_0000 } );
     test_program("tests/xor_equals.jai", gb, .{ .A, 0b1000_1111 } );
-    test_program("tests/if_003.jai", gb, .{ .C, 69 } );
+    test_program("tests/if_003.jai", gb, .{ .B, 69 } );
     test_program("tests/if_004.jai", gb, .{ .A, 2 } );
     test_program("tests/call_001.jai", gb, .{ .A, 69 } );
     test_program("tests/call_002.jai", gb);
     test_program("tests/call_003.jai", gb, .{ .A, 4 });
     test_program("tests/call_004.jai", gb, .{ .A, 122 });
     test_program("tests/call_005.jai", gb, .{ .A, 133 });
+    test_program("tests/if_005.jai", gb, .{ .A, 1 });
+    test_program("tests/if_006.jai", gb, .{ .A, 0 });
 }

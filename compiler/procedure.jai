@@ -1,8 +1,3 @@
-Member :: struct {
-    name: string;
-    register: Register;
-}
-
 Compile_Error :: struct {
     message: string;
     location: Code_Node.Location;
@@ -13,8 +8,9 @@ Compiled_Procedure :: struct {
 
     base_address : u16;
     bytes: [..]u8;
-    members: [..] Member; // @TODO @Speed: Hash_Table ?
+    members: Table(string, Register);
     nb_temporaries := 0;
+    return_added : bool;
 
     external_calls: [..] Call;
 
@@ -40,12 +36,9 @@ output_bytes :: (instr: Instruction_Kind, bytes : ..u8, loc := #caller_location)
 
 output_bytes :: (bytes: []u8, loc := #caller_location) {
     array_add(*context.current_procedure.bytes, ..bytes);
-    if global_verbose {
-        builder: String_Builder;
-        print_to_builder(*builder, "%:%:%:\t", loc.fully_pathed_filename, loc.line_number, loc.character_number);
-        disassemble_bytes(*builder, bytes, false);
-        log("%", builder_to_string(*builder));
-    }
+    builder: String_Builder;
+    disassemble_bytes(*builder, bytes, false);
+    log_verbose("%", builder_to_string(*builder));
 }
 
 disassemble_bytes :: (builder: *String_Builder, bytes: []u8, new_line : bool, base_address : u16 = 0x00) {
@@ -87,6 +80,7 @@ disassemble_bytes :: (builder: *String_Builder, bytes: []u8, new_line : bool, ba
             append(*inner, "\n");
         }
 
+        append(builder, "\t");
         append(builder, builder_to_string(*inner));
 
         i += op.bytes;
@@ -95,26 +89,25 @@ disassemble_bytes :: (builder: *String_Builder, bytes: []u8, new_line : bool, ba
 
 Jump_Kind :: enum {
     IF_FALSE;
+    IF_TRUE;
     ALWAYS;
+
+    NONE;
 }
 
-add_jump :: (kind: Jump_Kind) -> int {
+begin_jump :: (kind: Jump_Kind) -> int {
     using context.current_procedure;
+    addr := bytes.count;
     if #complete kind == {
-        case .IF_FALSE; {
-            addr := bytes.count;
-            output_bytes(.JR_NZ_REL, 0x00);
-            return addr;
-        }
-        case .ALWAYS; {
-            addr := bytes.count;
-            output_bytes(.JR_REL, 0x00);
-            return addr;
-        }
+        case .IF_FALSE; output_bytes(.JR_NZ_REL, 0x00);
+        case .IF_TRUE; output_bytes(.JR_Z_REL, 0x00);
+        case .ALWAYS; output_bytes(.JR_REL, 0x00);
+        case .NONE; assert(false, "Invalid jump");
     };
+    return addr;
 }
 
-patch_jump :: (jump_addr: int) {
+end_jump :: (jump_addr: int) {
     using context.current_procedure;
     current_addr := bytes.count;
     end_of_jump := jump_addr + 2;
@@ -135,89 +128,148 @@ add_call :: (proc: *Code_Procedure_Header) {
 
 push_member :: (name: string) {
     using context.current_procedure;
-    ok, pos := find_next_available_register();
-    assert(ok, "Too many members in procedure.");
-    array_add(*members, .{name, pos});
+    if table_contains(*members, name) {
+        error("Shadowing isn't supported yet");
+        return;
+    }
+    table_add(*members, name, .NONE);
 }
 
 push_temporary :: () -> string {
     using context.current_procedure;
-    ok, reg := find_next_available_register();
-    assert(ok);
     name := tprint("temp_%", formatInt(nb_temporaries, minimum_digits = 2));
-    array_add(*members, .{name, reg});
+    table_add(*members, name, .NONE);
     nb_temporaries += 1;
+    log_verbose("Adding temporary %", name);
     return name;
 }
 
-pop_member :: () {
+pop_member :: (name: string) {
     using context.current_procedure;
-    members.count -= 1;
+    ok := table_remove(*members, name); 
+    assert(ok, "Member % couldn't be found", name);
 }
 
 pop_temporary :: (name: string) {
     using context.current_procedure;
-    id := -1;
-    for members {
-        if it.name == name {
-            id = it_index;
-            break;
-        }
-    }
-    assert(id != -1, "Unable to find % in procedure members", name);
-    array_ordered_remove_by_index(*context.current_procedure.members, id);
+    ok := table_remove(*members, name); 
+    assert(ok, "Member % couldn't be found", name);
+    log_verbose("Popping temporary %", name);
     nb_temporaries -= 1;
 }
 
-member_location :: (name: string) -> Register {
+set_member_location :: (name: string, slot: Register) {
+    assert(slot != .NONE);
+    ensure_register_empty(slot);
+    table_set(*context.current_procedure.members, name, slot);
+}
+
+copy_members :: () -> Table(string, Register) {
+    using context.current_procedure;
+    result : Table(string, Register);
+
+    for members {
+        table_add(*result, it_index, it);
+    }
+    return result;
+}
+
+reconcile_members :: (original: Table(string, Register)) {
+    using context.current_procedure;
+    for *members {
+        ok, initial := table_find_new(*original, it_index);
+        assert(ok);
+        if it.* != initial {
+            ensure_register_empty(initial);
+            log_verbose("Reconciling % (% to %)", it_index, it.*, initial);
+            output_bytes(load_instruction(initial, it.*));
+            it.* = initial;
+        }
+    }
+    assert(check_members(members), "Reconciliation asked, but not complete!");
+}
+
+check_members :: (original: Table(string, Register)) -> bool {
     using context.current_procedure;
     for members {
-        if it.name == name then return it.register;
+        ok, initial := table_find_new(*original, it_index);
+        assert(ok);
+        if it != initial then return false;
     }
-    assert(false, "Member % couldn't be found.", name);
-    return .A;
+    return true;
+}
+
+// If member is not place, will be placed
+member_location :: (name: string) -> Register {
+    using context.current_procedure;
+    ok, slot := table_find_new(*members, name);
+    assert(ok, "Member % couldn't be found", name);
+    return slot;
 }
 
 ensure_register_empty :: (r: Register) {
     using context.current_procedure;
+    assert(r != .NONE);
     for *members {
-        if it.register == r {
+        if it.* == r {
             ok, new := find_next_available_register();
+            log_verbose("Making sure % is empty by moving %", r, it_index);
             output_bytes(load_instruction(new, r));
-            it.register = new;
+            it.* = new;
             return;
         }
     }
 }
 
-move_member :: (name: string, move_to: Register) {
+move_member :: (name: string, new_slot: Register) {
     using context.current_procedure;
-    target: *Member;
-    for *members {
-        if it.name == name {
-            target = it;
-            break;
-        }
+    assert(new_slot != .NONE);
+    ok, slot := table_find_new(*members, name);
+    assert(ok, "Member % couldn't be found", name);
+    if slot == new_slot then return; // Nothing to do
+    ensure_register_empty(new_slot);
+    log_verbose("Moving % to % (was in %)", name, new_slot, slot);
+    if slot != .NONE {
+        output_bytes(load_instruction(new_slot, slot));
     }
-    assert(target != null, "Member % couldn't be found", name);
-    if target.register == move_to then return; // Nothing to do
-    ensure_register_empty(move_to);
-    output_bytes(load_instruction(move_to, target.register));
+    table_set(*members, name, new_slot);
 }
 
-get_member_at :: (r: Register) -> *Member {
+move_member_to_next_available_slot :: (name: string) {
     using context.current_procedure;
-    for *members {
-        if it.register == r then return it;
+    ok, slot := find_next_available_register();
+    assert(ok, "Too many members");
+    ok=, current_slot := table_find_new(*members, name);
+    assert(ok, "Member % couldn't be found", name);
+    log_verbose("Moving % to % (was in %)", name, slot, current_slot);
+    if current_slot != .NONE {
+        output_bytes(load_instruction(slot, current_slot));
     }
-    return null;
+    table_set(*members, name, slot);
+}
+
+get_member_at :: (r: Register) -> bool, string {
+    using context.current_procedure;
+    for members {
+        if it == r then return true, it_index;
+    }
+    s : string = ---;
+    return true, s;
+}
+
+print_members :: () {
+    builder: String_Builder;
+    for context.current_procedure.members {
+        print_to_builder(*builder, "%: %, ", it_index, it);
+    }
+    log_verbose("{ % }", builder_to_string(*builder));
 }
 
 find_next_available_register :: () -> bool, Register {
     using context.current_procedure;
     for r: register_preference {
         for members {
-            if it.register == xx r then continue r;
+            if it == xx r then continue r;
         }
 
         return true, xx r;

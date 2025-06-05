@@ -1,13 +1,8 @@
-global_verbose := false;
-
 #add_context current_procedure: *Compiled_Procedure;
 #add_context current_node: *Code_Node;
 
-build_cart :: (file: string, verbose := false) -> MBC1 {
-    global_verbose = verbose;
-    if global_verbose {
-        log("%", file);
-    }
+build_cart :: (file: string) -> MBC1 {
+    log_verbose("%", file);
     w := compiler_create_workspace();
     
     options := get_build_options();
@@ -95,12 +90,10 @@ generate_assembly :: (procedures: [..]*Code_Procedure_Header) -> bool, MBC1 {
     }
 
     for compiled {
-        if global_verbose {
-            log("%:", it.procedure_header.name);
-            builder: String_Builder;
-            disassemble_procedure(*builder, it);
-            log("%", builder_to_string(*builder));
-        }
+        log_verbose("%:", it.procedure_header.name);
+        builder: String_Builder;
+        disassemble_procedure(*builder, it);
+        log_verbose("%", builder_to_string(*builder));
     }
 
     cart := output_rom(compiled);
@@ -126,6 +119,7 @@ disassemble_procedure :: (builder: *String_Builder, proc: Compiled_Procedure) {
 }
 
 generate_procedure :: (proc: *Code_Procedure_Header) -> Compiled_Procedure {
+    log_verbose("Compiling %", proc.name);
     result: Compiled_Procedure;
     result.procedure_header = proc;
     assert(proc.body_or_null != null, "Procedure didn't compile?");
@@ -137,7 +131,7 @@ generate_procedure :: (proc: *Code_Procedure_Header) -> Compiled_Procedure {
 
     if proc.name == "main" {
         output_bytes(.HALT,, current_procedure = *result);
-    } else {
+    } else if !result.return_added {
         output_bytes(.RET,, current_procedure = *result);
     }
 
@@ -211,12 +205,13 @@ compile_block :: () {
     }
 
     for block.members {
-        pop_member();
+        pop_member(it.name);
     }
 }
 
 compile_statement :: () {
     node := context.current_node;
+    log_verbose("Statement %", node.kind);
     if node.kind == {
         case .DECLARATION; {
             decl := cast(*Code_Declaration)node;
@@ -240,8 +235,7 @@ compile_statement :: () {
                 }
             }
             if decl.expression != null {
-                target := member_location(decl.name);
-                compile_expression(target,, current_node = decl.expression);
+                compile_expression(decl.name,, current_node = decl.expression);
             }
 
             return;
@@ -253,20 +247,25 @@ compile_statement :: () {
                 return ;
             }
             // If expects the result of the condition to be in .A
-            compile_condition(,, current_node = code.condition);
-            then_jump := add_jump(.IF_FALSE); 
+            jump_kind := compile_condition(,, current_node = code.condition);
+            initial_members := copy_members(,, temp);
+            skip_then := begin_jump(jump_kind); 
+
             compile_block(,, current_node = code.then_block);
+            then_members := copy_members(,, temp);
+
             else_jump : int = -1;  
             if code.else_block != null {
-                else_jump = add_jump(.ALWAYS);
-            }
-            patch_jump(then_jump);
-            compile_block(,, current_node = code.else_block);
-            if code.else_block != null {
-                patch_jump(else_jump);
+                skip_else := begin_jump(.ALWAYS);
+                end_jump(skip_then);
+                compile_block(,, current_node = code.else_block);
+                reconcile_members(then_members);
+                end_jump(skip_else);
+            } else {
+                reconcile_members(initial_members);
+                end_jump(skip_then);
             }
 
-            return;
         }
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
@@ -278,8 +277,9 @@ compile_statement :: () {
 
             if op == {
                 case #char "="; {
-                    target := member_location(bin_op.left.(*Code_Ident).name);
-                    compile_expression(target,, current_node = bin_op.right);
+                    name := bin_op.left.(* Code_Ident).name;
+                    move_member_to_next_available_slot(name);
+                    compile_expression(name,, current_node = bin_op.right);
                 }
                 // @TODO, keep target in A
                 case .PLUS_ASSIGN; #through;
@@ -298,10 +298,17 @@ compile_statement :: () {
                         }
                     }
 
+                    log_verbose(">> creating temp");
+                    print_members();
                     temp := push_temporary();
                     defer pop_temporary(temp);
-                    compile_expression(member_location(temp),, current_node = bin_op.right);
+                    move_member_to_next_available_slot(temp);
+                    log_verbose(">> Compiling right");
+                    print_members();
+                    compile_expression(temp,, current_node = bin_op.right);
 
+                    log_verbose(">> Compiling left");
+                    print_members();
                     move_member(bin_op.left.(*Code_Ident).name, .A);
                     output_bytes(arithmetic_instruction(get_instruction(op), member_location(temp)));
                 }
@@ -322,9 +329,14 @@ compile_statement :: () {
                 return;
             }
             if ret.arguments_sorted.count == 1 {
-                compile_expression(.A,, current_node = ret.arguments_sorted[0]);
+                ensure_register_empty(.A);
+                temp := push_temporary();
+                defer pop_temporary(temp);
+                set_member_location(temp, .A);
+                compile_expression(temp,, current_node = ret.arguments_sorted[0]);
             }
-            // ret is added in the footer
+            output_bytes(.RET);
+            context.current_procedure.return_added = true;
         }
         case; {
             error(tprint("Unhandled statement kind: %", node.kind));
@@ -333,8 +345,9 @@ compile_statement :: () {
     }
 }
 
-compile_expression :: (destination_register : Register = .A) {
+compile_expression :: (target_member: string) {
     node := context.current_node;
+    log_verbose("Expression %", node.kind);
     if node.kind == {
         case .LITERAL; {
             lit := node.(*Code_Literal);
@@ -348,11 +361,17 @@ compile_expression :: (destination_register : Register = .A) {
                         error("u16s aren't supported"); // @TODO
                         return;
                     }
-                    output_bytes(load_imm8(destination_register), lit._u64.(u8));
+                    if member_location(target_member) == .NONE {
+                        move_member_to_next_available_slot(target_member);
+                    }
+                    output_bytes(load_imm8(member_location(target_member)), lit._u64.(u8));
                     return;
                 }
                 case .BOOLEAN;{
-                    output_bytes(load_imm8(destination_register), lit._u64.(u8));
+                    if member_location(target_member) == .NONE {
+                        move_member_to_next_available_slot(target_member);
+                    }
+                    output_bytes(load_imm8(member_location(target_member)), lit._u64.(u8));
                     return;
                 }
                 case; {
@@ -364,8 +383,12 @@ compile_expression :: (destination_register : Register = .A) {
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
             op : Operator_Type = xx bin_op.operator_type;
-            compile_expression(.B,, current_node = bin_op.right);
-            compile_expression(.A,, current_node = bin_op.left); 
+            right := push_temporary();
+            defer pop_temporary(right);
+            compile_expression(right,, current_node = bin_op.right);
+            left := push_temporary();
+            defer pop_temporary(left);
+            compile_expression(left,, current_node = bin_op.left); 
 
             instr: Arithmetic_Instruction;
             if op == {
@@ -380,11 +403,13 @@ compile_expression :: (destination_register : Register = .A) {
                     return;
                 }
             }
-            output_bytes(arithmetic_instruction(instr, .B)); 
+            move_member(left, .A);
+            output_bytes(arithmetic_instruction(instr, member_location(right))); 
+            set_member_location(target_member, .A);
         }
         case .IDENT; {
             ident := node.(*Code_Ident);
-            move_member(ident.name, destination_register);
+            output_bytes(load_instruction(member_location(target_member), member_location(ident.name)));
         }
         case .PROCEDURE_CALL; {
             call := node.(*Code_Procedure_Call);
@@ -392,10 +417,18 @@ compile_expression :: (destination_register : Register = .A) {
                 error("The expression isn't a procedure header");
                 return;
             }
-            ensure_register_empty(.A);
+            if call.num_return_values_received > 1 {
+                error("Multiple return values aren't supported yet");
+                return;
+            }
+            if call.num_return_values_received != 0 {
+                if member_location(target_member) != .A { 
+                    ensure_register_empty(.A);
+                }
+            }
             add_call(call.resolved_procedure_expression.(*Code_Procedure_Header));
-            if destination_register != .A {
-                output_bytes(load_instruction(destination_register, .A));
+            if call.num_return_values_received != 0 {
+                set_member_location(target_member, .A);
             }
         }
         case; {
@@ -405,34 +438,48 @@ compile_expression :: (destination_register : Register = .A) {
     }
 }
 
-compile_condition :: () {
+compile_condition :: () -> Jump_Kind {
     node := context.current_node;
     if node.kind == {
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
             op : Operator_Type = xx bin_op.operator_type;
-            compile_expression(.B,, current_node = bin_op.right);
-            compile_expression(.A,, current_node = bin_op.left); 
+            right := push_temporary();
+            defer pop_temporary(right);
+            move_member_to_next_available_slot(right);
+            compile_expression(right,, current_node = bin_op.right);
 
-            instr: Arithmetic_Instruction;
+            left := push_temporary();
+            defer pop_temporary(left);
+            ensure_register_empty(.A);
+            set_member_location(left, .A);
+            compile_expression(left,, current_node = bin_op.left); 
+
+            output_bytes(arithmetic_instruction(.CP, member_location(right))); 
             if op == {
-                case .IS_EQUAL; instr = .CP;
+                case .IS_EQUAL; return .IF_FALSE;
+                case .IS_NOT_EQUAL; return .IF_TRUE;
                 case; { 
-                    error(tprint("Unhandled binary operator expression '%'", operator_to_string2(op))); 
-                    return;
+                    error(tprint("Unhandled binary operator comparison '%'", operator_to_string2(op))); 
+                    return .NONE;
                 }
             }
 
-            output_bytes(arithmetic_instruction(instr, .B)); 
         }
         case .IDENT; #through;
         case .LITERAL; {
-            compile_expression(,, current_node = node);
+            temp := push_temporary();
+            defer pop_temporary(temp);
+            ensure_register_empty(.A);
+            set_member_location(temp, .A);
+
+            compile_expression(temp,, current_node = node);
             output_bytes(.CP_D8, 0x1);
+            return .IF_FALSE;
         }
         case; {
             error(tprint("Unhandled condition expression kind: %", node.kind));
-            return;
+            return .NONE;
         }
 
     }
@@ -450,6 +497,7 @@ Instruction_Kind :: enum u8 {
     NOP :: 0x0;
     JR_REL :: 0x18;
     JR_NZ_REL :: 0x20;
+    JR_Z_REL :: 0x28;
     LD_A_IMM :: 0x3E;
     HALT :: 0x76;
     RET :: 0xC9;
@@ -461,10 +509,12 @@ load_instruction :: (dst: Register, src: Register) -> u8 {
     assert(!(src == .HL_INDIRECT && src == .HL_INDIRECT), "This is HALT");
     assert(dst <= .A);
     assert(dst != src, "This is a dumb and useless operation");
+    assert(dst != .NONE && src != .NONE, "Loading from % to %", src, dst);
     return 0x40 + (dst.(u8) * 8) + src.(u8);
 }
 
 load_imm8 :: (dst: Register) -> u8 {
+    assert(dst != .NONE, "Trying to load from %", dst);
     lo : u8 = 0x6 + ((dst.(u8) % 2) * 0x8);
     hi : u8 = (dst.(u8) / 2) << 4;
     return lo | hi;
@@ -481,11 +531,17 @@ Arithmetic_Instruction :: enum u8 {
     CP  :: 0xB8;
 }
 
+Comparison_Instruction :: enum u8 {
+
+}
+
 arithmetic_instruction :: (kind: Arithmetic_Instruction, src: Register) -> u8 {
+    assert(src != .NONE);
     return kind.(u8) + src.(u8);
 }
 
 swap_instruction :: (dst: Register) -> [2]u8 {
+    assert(dst != .NONE);
     result : [2]u8;
     result[0] = 0xCB;
     result[1] = 0x30 + dst.(u8);
@@ -501,6 +557,8 @@ Register :: enum {
     L :: 5;
     HL_INDIRECT :: 6;
     A :: 7;
+
+    NONE :: -1;
 }
 
 register_preference :: Register.[
@@ -541,5 +599,13 @@ unreachable :: () #expand {
     return;
 }
 
+log_verbose :: (format: string, args: ..Any) #expand {
+    if context.log_level >= .VERBOSE {
+        log(format, ..args, flags = .VERBOSE_ONLY);
+    }
+}
+
 #load "../common/opcodes.jai";
 #load "procedure.jai";
+
+#import "Hash_Table";
