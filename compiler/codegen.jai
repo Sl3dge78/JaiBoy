@@ -191,7 +191,8 @@ find_procedure :: (header: *Code_Procedure_Header, procs: []Compiled_Procedure) 
 compile_block :: () {
     block := context.current_node.(*Code_Block);
     for block.members {
-        push_member(it.name);
+        assert(it.kind == .DECLARATION);
+        push_member(it.name, null);
     }
 
     if block.block_type != .IMPERATIVE {
@@ -215,24 +216,9 @@ compile_statement :: () {
     if node.kind == {
         case .DECLARATION; {
             decl := cast(*Code_Declaration)node;
-            if decl.type_inst != null {
-                if decl.type_inst.pointer_to != null {
-                    error("Pointers aren't implemented yet");
-                    return;
-                }
-                if decl.type_inst.array_element_type != null {
-                    error("Arrays aren't implemented yet");
-                    return;
-                }
-                ti := decl.type_inst.result;
-                if ti.type != .INTEGER {
-                    error("Only integers are supported");
-                    return;
-                }
-                if ti.runtime_size > 1 {
-                    error("Only 8 bit integers are supported");
-                    return;
-                }
+            t := to_gb_type(decl.type);
+            if t != .NONE {
+                type_member(decl.name, t);
             }
             if decl.expression != null {
                 compile_expression(decl.name,, current_node = decl.expression);
@@ -270,18 +256,18 @@ compile_statement :: () {
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
             op : Operator_Type = xx bin_op.operator_type;
-            if bin_op.left.kind != .IDENT {
-                error(tprint("We expected an identifier to the left of a = operator, but we got a %", bin_op.left.kind));
-                return;
+            ok, left, temp := rvalue(bin_op.left);
+            if !ok then return;
+            defer {
+                if temp {
+                    pop_temporary(left);
+                }
             }
 
             if op == {
                 case #char "="; {
-                    name := bin_op.left.(* Code_Ident).name;
-                    move_member_to_next_available_slot(name);
-                    compile_expression(name,, current_node = bin_op.right);
+                    compile_expression(left,, current_node = bin_op.right);
                 }
-                // @TODO, keep target in A
                 case .PLUS_ASSIGN; #through;
                 case .MINUS_ASSIGN; #through;
                 case .BITWISE_AND_ASSIGN; #through;
@@ -298,18 +284,11 @@ compile_statement :: () {
                         }
                     }
 
-                    log_verbose(">> creating temp");
-                    print_members();
                     temp := push_temporary();
                     defer pop_temporary(temp);
-                    move_member_to_next_available_slot(temp);
-                    log_verbose(">> Compiling right");
-                    print_members();
                     compile_expression(temp,, current_node = bin_op.right);
 
-                    log_verbose(">> Compiling left");
-                    print_members();
-                    move_member(bin_op.left.(*Code_Ident).name, .A);
+                    move_member(left, .A);
                     output_bytes(arithmetic_instruction(get_instruction(op), member_location(temp)));
                 }
                 case; {
@@ -338,10 +317,49 @@ compile_statement :: () {
             output_bytes(.RET);
             context.current_procedure.return_added = true;
         }
+        case .PROCEDURE_CALL; {
+            call := node.(*Code_Procedure_Call);
+            if call.resolved_procedure_expression == null || call.resolved_procedure_expression.kind != .PROCEDURE_HEADER {
+                error("The expression isn't a procedure header");
+                return;
+            }
+            add_call(call.resolved_procedure_expression.(*Code_Procedure_Header));
+        }
         case; {
             error(tprint("Unhandled statement kind: %", node.kind));
             return;
         }
+    }
+}
+
+rvalue :: (node: *Code_Node) -> bool, string, temporary: bool {
+    if node.kind == {
+        case .IDENT; {
+            ident := node.(*Code_Ident);
+            return true, ident.name, false;
+        }
+        case .UNARY_OPERATOR; {
+            unary := node.(*Code_Unary_Operator);
+            op : Operator_Type = xx unary.operator_type;
+            if op == {
+                case .POSTFIX_DEREFERENCE; #through;
+                case .POINTER_DEREFERENCE; {
+                    temp := push_temporary();
+                    set_member_location(temp, .HL_INDIRECT);
+                    ok, name := rvalue(unary.subexpression);
+                    if !ok then return false, "", false;
+                    move_member(name, .HL);
+                    return true, temp, true;
+                }
+                case; {
+                    error(tprint("Unsupported unary operator rvalue: %", operator_to_string2(xx unary.operator_type)));
+                    return false, "", false;
+                }
+            }
+        }
+        case; 
+            error(tprint("Unsupported rvalue: %", node.kind));
+            return false, "", false;
     }
 }
 
@@ -357,21 +375,39 @@ compile_expression :: (target_member: string) {
                         error("Floats aren't supported");
                         return;
                     }
-                    if lit._u64 > 0xFF {
-                        error("u16s aren't supported"); // @TODO
+                    type: GB_Type;
+                    if lit._u64 <= 0xFF {
+                        type = .U8;
+                    } else if lit._u64 <= 0xFFFF {
+                        type = .U16;
+                    } else {
+                        error("numbers larger than 2 bytes aren't supported"); 
                         return;
                     }
-                    if member_location(target_member) == .NONE {
-                        move_member_to_next_available_slot(target_member);
+
+                    if get_member_type(target_member) == .NONE {
+                        log_verbose("Typing member: % - %", target_member, type);
+                        type_member(target_member, type);
                     }
-                    output_bytes(load_imm8(member_location(target_member)), lit._u64.(u8));
+                    ensure_member_placed(target_member);
+                    if type == {
+                        case .U8; {
+                            load_imm8(member_location(target_member), lit._u64.(u8));
+                        }
+                        case .U16; {
+                            load_imm16(member_location(target_member), lit._u64.(u16));
+                        }
+                        case; assert(false);
+
+                    }
                     return;
                 }
                 case .BOOLEAN;{
                     if member_location(target_member) == .NONE {
+                        type_member(target_member, .U8);
                         move_member_to_next_available_slot(target_member);
                     }
-                    output_bytes(load_imm8(member_location(target_member)), lit._u64.(u8));
+                    load_imm8(member_location(target_member), lit._u64.(u8));
                     return;
                 }
                 case; {
@@ -409,7 +445,9 @@ compile_expression :: (target_member: string) {
         }
         case .IDENT; {
             ident := node.(*Code_Ident);
-            output_bytes(load_instruction(member_location(target_member), member_location(ident.name)));
+            type_member(target_member, get_member_type(ident.name));
+            ensure_member_placed(target_member);
+            load_instruction(member_location(target_member), member_location(ident.name));
         }
         case .PROCEDURE_CALL; {
             call := node.(*Code_Procedure_Call);
@@ -431,6 +469,21 @@ compile_expression :: (target_member: string) {
                 set_member_location(target_member, .A);
             }
         }
+        case .CAST; {
+            cst := node.(*Code_Cast);
+            if (cst.cast_flags & ~(.IS_AUTO)) != 0 {
+                error(tprint("Unhandled cast: %", cst.cast_flags));
+                return;
+            }
+            if cst.cast_flags & .IS_AUTO {
+                // Just use the type of the target_member
+                compile_expression(target_member,, current_node = cst.expression);
+                return;
+            } else {
+                cast_member(target_member, to_gb_type(cst.target_type.result));
+                compile_expression(target_member,, current_node = cst.expression);
+            }
+        }
         case; {
             error(tprint("Unhandled expression kind: %", node.kind));
             return;
@@ -446,8 +499,12 @@ compile_condition :: () -> Jump_Kind {
             op : Operator_Type = xx bin_op.operator_type;
             right := push_temporary();
             defer pop_temporary(right);
-            move_member_to_next_available_slot(right);
+            // arent U8
             compile_expression(right,, current_node = bin_op.right);
+            if get_member_type(right) != .U8 {
+                error(tprint("Comparing % isn't supported yet", get_member_type(right)));
+                return .NONE;
+            }
 
             left := push_temporary();
             defer pop_temporary(left);
@@ -505,19 +562,46 @@ Instruction_Kind :: enum u8 {
     CP_D8 :: 0xFE;
 }
 
-load_instruction :: (dst: Register, src: Register) -> u8 {
-    assert(!(src == .HL_INDIRECT && src == .HL_INDIRECT), "This is HALT");
-    assert(dst <= .A);
-    assert(dst != src, "This is a dumb and useless operation");
-    assert(dst != .NONE && src != .NONE, "Loading from % to %", src, dst);
-    return 0x40 + (dst.(u8) * 8) + src.(u8);
+load_instruction :: (dst_register: Register, src_register: Register) {
+    if !is_wide(dst_register) && !is_wide(src_register) {
+        dst := to_opcode(dst_register);
+        src := to_opcode(src_register);
+        assert(!(src == .HL_INDIRECT && dst == .HL_INDIRECT), "This is HALT");
+        assert(dst <= .A);
+        assert(dst != src, "This is a dumb and useless operation");
+        output_bytes(0x40 + (dst.(u8) * 8) + src.(u8));
+    } else {
+        lo_src, hi_src := split_register(src_register);
+        lo_dst, hi_dst := split_register(dst_register);
+        assert(lo_src != .NONE && lo_dst != .NONE, "One of the registers is None. src: % dst: %", lo_src, lo_dst);
+        assert(hi_dst != .NONE, "Copying a wide register to a small one!");
+        load_instruction(lo_dst, lo_src);
+        if hi_src != .NONE {
+            load_instruction(hi_dst, hi_src);
+        }
+    }
 }
 
-load_imm8 :: (dst: Register) -> u8 {
-    assert(dst != .NONE, "Trying to load from %", dst);
-    lo : u8 = 0x6 + ((dst.(u8) % 2) * 0x8);
-    hi : u8 = (dst.(u8) / 2) << 4;
-    return lo | hi;
+load_imm8 :: (dst: Register, val: u8) {
+    assert(!is_wide(dst), "Loading imm8 to wide register");
+    tgt := to_opcode(dst);
+    lo : u8 = 0x6 + ((tgt.(u8) % 2) * 0x8);
+    hi : u8 = (tgt.(u8) / 2) << 4;
+    output_bytes(lo | hi, val);
+}
+
+load_imm16 :: (dst: Register, val: u16) {
+    assert(is_wide(dst), "Loading a u16 in an 8 bit register!");
+    
+    instr : u8;
+    if dst == {
+        case .BC; instr = 0x01;
+        case .DE; instr = 0x01;
+        case .HL; instr = 0x21;
+        case; assert(false, "I don't know how to handle this: %", dst);
+    }
+
+    output_bytes(instr, (val & 0xFF).(u8), ((val >> 8) & 0xFF).(u8));
 }
 
 Arithmetic_Instruction :: enum u8 {
@@ -531,24 +615,12 @@ Arithmetic_Instruction :: enum u8 {
     CP  :: 0xB8;
 }
 
-Comparison_Instruction :: enum u8 {
-
-}
-
 arithmetic_instruction :: (kind: Arithmetic_Instruction, src: Register) -> u8 {
-    assert(src != .NONE);
-    return kind.(u8) + src.(u8);
+    tgt := to_opcode(src);
+    return kind.(u8) + tgt.(u8);
 }
 
-swap_instruction :: (dst: Register) -> [2]u8 {
-    assert(dst != .NONE);
-    result : [2]u8;
-    result[0] = 0xCB;
-    result[1] = 0x30 + dst.(u8);
-    return result;
-}
-
-Register :: enum {
+Operation_Target :: enum {
     B :: 0;
     C :: 1;
     D :: 2;
@@ -557,8 +629,23 @@ Register :: enum {
     L :: 5;
     HL_INDIRECT :: 6;
     A :: 7;
+}
 
-    NONE :: -1;
+Register :: enum_flags {
+    NONE:: 0;
+    A :: 1;
+    B :: 2;
+    C :: 4;
+    D :: 8;
+    E :: 16;
+    H :: 32;
+    L :: 64;
+
+    BC :: 2 | 4;
+    DE :: 8 | 16;
+    HL :: 32 | 64;
+
+    HL_INDIRECT :: 128;
 }
 
 register_preference :: Register.[
@@ -570,6 +657,44 @@ register_preference :: Register.[
     .H,
     .L
 ];
+
+wide_register_preference :: Register.[
+    .HL,
+    .BC,
+    .DE,
+];
+
+get_lo :: (r: Register) -> Register {
+    return r & .C | r & .E | r & .L;
+}
+
+get_hi :: (r: Register) -> Register {
+    return r & .B | r & .D | r & .H;
+}
+
+is_wide :: (r: Register) -> bool {
+    return r == .BC || r == .DE || r == .HL;
+}
+
+split_register :: (r: Register) -> lo: Register, hi: Register {
+    if !is_wide(r) return r, .NONE;
+    return get_lo(r), get_hi(r);
+}
+
+to_opcode :: (r: Register) -> Operation_Target {
+    assert(!is_wide(r), "R: %", r);
+    if r & .A return .A;
+    if r & .B return .B;
+    if r & .C return .C;
+    if r & .D return .D;
+    if r & .E return .E;
+    if r & .H return .H;
+    if r & .L return .L;
+    if r & .HL_INDIRECT return .HL_INDIRECT;
+    assert(false, "r: %", r);
+    return 0;
+}
+
 
 Cart_Header :: struct {
     blank: [0x100]u8;
@@ -607,5 +732,6 @@ log_verbose :: (format: string, args: ..Any) #expand {
 
 #load "../common/opcodes.jai";
 #load "procedure.jai";
+#load "member.jai";
 
 #import "Hash_Table";

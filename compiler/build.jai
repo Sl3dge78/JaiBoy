@@ -1,7 +1,7 @@
 #run build_and_output_rom();
 
 build_and_output_rom :: () {
-    cart := build_cart("tests/if_006.jai",, log_level = .VERBOSE);
+    cart := build_cart("tests/memory_write_001.jai",, log_level = .VERBOSE);
 
     filename := "output_rom.gb";
     write_entire_file(filename, cart.contents.data, cart.contents.count);

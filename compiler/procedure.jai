@@ -8,7 +8,7 @@ Compiled_Procedure :: struct {
 
     base_address : u16;
     bytes: [..]u8;
-    members: Table(string, Register);
+    members: Member_Table;
     nb_temporaries := 0;
     return_added : bool;
 
@@ -21,6 +21,8 @@ Call :: struct {
     instr: u16;
     procedure: *Code_Procedure_Header;
 }
+
+
 
 output_bytes :: (bytes: ..u8, loc := #caller_location) {
     output_bytes(bytes, loc); 
@@ -126,158 +128,11 @@ add_call :: (proc: *Code_Procedure_Header) {
     output_bytes(.CALL, 0x00, 0x00);
 }
 
-push_member :: (name: string) {
-    using context.current_procedure;
-    if table_contains(*members, name) {
-        error("Shadowing isn't supported yet");
-        return;
-    }
-    table_add(*members, name, .NONE);
-}
-
-push_temporary :: () -> string {
-    using context.current_procedure;
-    name := tprint("temp_%", formatInt(nb_temporaries, minimum_digits = 2));
-    table_add(*members, name, .NONE);
-    nb_temporaries += 1;
-    log_verbose("Adding temporary %", name);
-    return name;
-}
-
-pop_member :: (name: string) {
-    using context.current_procedure;
-    ok := table_remove(*members, name); 
-    assert(ok, "Member % couldn't be found", name);
-}
-
-pop_temporary :: (name: string) {
-    using context.current_procedure;
-    ok := table_remove(*members, name); 
-    assert(ok, "Member % couldn't be found", name);
-    log_verbose("Popping temporary %", name);
-    nb_temporaries -= 1;
-}
-
-set_member_location :: (name: string, slot: Register) {
-    assert(slot != .NONE);
-    ensure_register_empty(slot);
-    table_set(*context.current_procedure.members, name, slot);
-}
-
-copy_members :: () -> Table(string, Register) {
-    using context.current_procedure;
-    result : Table(string, Register);
-
-    for members {
-        table_add(*result, it_index, it);
-    }
-    return result;
-}
-
-reconcile_members :: (original: Table(string, Register)) {
-    using context.current_procedure;
-    for *members {
-        ok, initial := table_find_new(*original, it_index);
-        assert(ok);
-        if it.* != initial {
-            ensure_register_empty(initial);
-            log_verbose("Reconciling % (% to %)", it_index, it.*, initial);
-            output_bytes(load_instruction(initial, it.*));
-            it.* = initial;
-        }
-    }
-    assert(check_members(members), "Reconciliation asked, but not complete!");
-}
-
-check_members :: (original: Table(string, Register)) -> bool {
-    using context.current_procedure;
-    for members {
-        ok, initial := table_find_new(*original, it_index);
-        assert(ok);
-        if it != initial then return false;
-    }
-    return true;
-}
-
-// If member is not place, will be placed
-member_location :: (name: string) -> Register {
-    using context.current_procedure;
-    ok, slot := table_find_new(*members, name);
-    assert(ok, "Member % couldn't be found", name);
-    return slot;
-}
-
-ensure_register_empty :: (r: Register) {
-    using context.current_procedure;
-    assert(r != .NONE);
-    for *members {
-        if it.* == r {
-            ok, new := find_next_available_register();
-            log_verbose("Making sure % is empty by moving %", r, it_index);
-            output_bytes(load_instruction(new, r));
-            it.* = new;
-            return;
-        }
-    }
-}
-
-move_member :: (name: string, new_slot: Register) {
-    using context.current_procedure;
-    assert(new_slot != .NONE);
-    ok, slot := table_find_new(*members, name);
-    assert(ok, "Member % couldn't be found", name);
-    if slot == new_slot then return; // Nothing to do
-    ensure_register_empty(new_slot);
-    log_verbose("Moving % to % (was in %)", name, new_slot, slot);
-    if slot != .NONE {
-        output_bytes(load_instruction(new_slot, slot));
-    }
-    table_set(*members, name, new_slot);
-}
-
-move_member_to_next_available_slot :: (name: string) {
-    using context.current_procedure;
-    ok, slot := find_next_available_register();
-    assert(ok, "Too many members");
-    ok=, current_slot := table_find_new(*members, name);
-    assert(ok, "Member % couldn't be found", name);
-    log_verbose("Moving % to % (was in %)", name, slot, current_slot);
-    if current_slot != .NONE {
-        output_bytes(load_instruction(slot, current_slot));
-    }
-    table_set(*members, name, slot);
-}
-
-get_member_at :: (r: Register) -> bool, string {
-    using context.current_procedure;
-    for members {
-        if it == r then return true, it_index;
-    }
-    s : string = ---;
-    return true, s;
-}
-
-print_members :: () {
-    builder: String_Builder;
-    for context.current_procedure.members {
-        print_to_builder(*builder, "%: %, ", it_index, it);
-    }
-    log_verbose("{ % }", builder_to_string(*builder));
-}
-
-find_next_available_register :: () -> bool, Register {
-    using context.current_procedure;
-    for r: register_preference {
-        for members {
-            if it == xx r then continue r;
-        }
-
-        return true, xx r;
-    }
-    assert(false, "Unable to find a free spot for member");
-    return false, 0;
-}
 
 error :: (message: string) {
     array_add(*context.current_procedure.errors, .{message, context.current_node.location});
+}
+
+fatal :: (message: string) {
+    log_error("FATAL: %", message);
 }

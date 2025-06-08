@@ -7,16 +7,8 @@
 #load "codegen.jai";
 
 #run {
-    test_load_gen();
     test_programs();
     set_build_options_dc(.{do_output=false});
-}
-
-test_load_gen :: () {
-    assert(load_imm8(.A) == 0x3E);
-    assert(load_imm8(.B) == 0x06);
-    assert(load_imm8(.C) == 0x0E);
-    assert(load_imm8(.D) == 0x16);
 }
 
 run_program :: (path: string, gb: *Gameboy, builder: *String_Builder) -> bool {
@@ -44,6 +36,7 @@ run_program :: (path: string, gb: *Gameboy, builder: *String_Builder) -> bool {
 
 test_program :: (path: string, gb: *Gameboy, verifs: ..Verification) {
     builder : String_Builder;
+    log("Building %", path);
     if !run_program(path, gb, *builder) {
         print_color("Failed!\n", color = .RED);
         print_color("%\n", builder_to_string(*builder), color = .RED);
@@ -129,25 +122,25 @@ test_programs :: () {
 
     init(gb,, temp);
 
-    test_program("tests/add.jai", gb, cpu(.A, 2 } );
-    test_program("tests/sub.jai", gb, cpu(.A, 1 } );
-    test_program("tests/or.jai", gb,  cpu(.A, 0b1110_1101 } );
-    test_program("tests/and.jai", gb, cpu(.A, 0b1100_0000 } );
-    test_program("tests/if_001.jai", gb, cpu(.A, 1 } );
-    test_program("tests/if_002.jai", gb, cpu(.B, 2 } );
-    test_program("tests/add_equals.jai", gb, cpu(.A, 3 } );
-    test_program("tests/sub_equals.jai", gb, cpu(.A, 1 } );
-    test_program("tests/or_equals.jai", gb, cpu(.A, 0b1111_1101 } );
-    test_program("tests/and_equals.jai", gb, cpu(.A, 0b1000_0000 } );
-    test_program("tests/xor_equals.jai", gb, cpu(.A, 0b1000_1111 } );
-    test_program("tests/if_003.jai", gb, cpu(.B, 69 } );
-    test_program("tests/if_004.jai", gb, cpu(.A, 2 } );
-    test_program("tests/call_001.jai", gb, cpu( .A, 69 } );
+    test_program("tests/add.jai", gb, cpu(.A, 2));
+    test_program("tests/sub.jai", gb, cpu(.A, 1));
+    test_program("tests/or.jai", gb,  cpu(.A, 0b1110_1101));
+    test_program("tests/and.jai", gb, cpu(.A, 0b1100_0000));
+    test_program("tests/if_001.jai", gb, cpu(.A, 1));
+    test_program("tests/if_002.jai", gb, cpu(.B, 2));
+    test_program("tests/add_equals.jai", gb, cpu(.A, 3));
+    test_program("tests/sub_equals.jai", gb, cpu(.A, 1));
+    test_program("tests/or_equals.jai", gb, cpu(.A, 0b1111_1101));
+    test_program("tests/and_equals.jai", gb, cpu(.A, 0b1000_0000));
+    test_program("tests/xor_equals.jai", gb, cpu(.A, 0b1000_1111));
+    test_program("tests/if_003.jai", gb, cpu(.B, 69));
+    test_program("tests/if_004.jai", gb, cpu(.A, 2));
+    test_program("tests/call_001.jai", gb, cpu(.A, 69));
     test_program("tests/call_002.jai", gb);
-    test_program("tests/call_003.jai", gb, .{ .CPU, register = .A, 4 });
-    test_program("tests/call_004.jai", gb, .{ .CPU, register = .A, 122 });
-    test_program("tests/call_005.jai", gb, .{ .CPU, register = .A, 133 });
-    test_program("tests/if_005.jai", gb, .{ .CPU, register = .A, 1 });
-    test_program("tests/if_006.jai", gb, .{ .CPU, register = .A, 0 });
-    test_program("tests/memory_write.jai", gb, .{ .CPU, register = .A, 0 });
+    test_program("tests/call_003.jai", gb,cpu(.A, 4));
+    test_program("tests/call_004.jai", gb,cpu(.A, 122));
+    test_program("tests/call_005.jai", gb,cpu(.A, 133));
+    test_program("tests/if_005.jai", gb,cpu(.A, 1));
+    test_program("tests/if_006.jai", gb,cpu(.A, 0));
+    test_program("tests/memory_write_001.jai", gb,cpu(.A, 0));
 }
