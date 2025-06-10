@@ -143,4 +143,5 @@ test_programs :: () {
     test_program("tests/if_005.jai", gb,cpu(.A, 1));
     test_program("tests/if_006.jai", gb,cpu(.A, 0));
     test_program("tests/memory_write_001.jai", gb,cpu(.A, 0));
+    test_program("tests/while_001.jai", gb,cpu(.B, 10));
 }

@@ -22,8 +22,6 @@ Call :: struct {
     procedure: *Code_Procedure_Header;
 }
 
-
-
 output_bytes :: (bytes: ..u8, loc := #caller_location) {
     output_bytes(bytes, loc); 
 }
@@ -93,6 +91,7 @@ Jump_Kind :: enum {
     IF_FALSE;
     IF_TRUE;
     ALWAYS;
+    IF_CARRY;
 
     NONE;
 }
@@ -103,6 +102,7 @@ begin_jump :: (kind: Jump_Kind) -> int {
     if #complete kind == {
         case .IF_FALSE; output_bytes(.JR_NZ_REL, 0x00);
         case .IF_TRUE; output_bytes(.JR_Z_REL, 0x00);
+        case .IF_CARRY; output_bytes(.JR_C_REL, 0x00);
         case .ALWAYS; output_bytes(.JR_REL, 0x00);
         case .NONE; assert(false, "Invalid jump");
     };
@@ -114,8 +114,21 @@ end_jump :: (jump_addr: int) {
     current_addr := bytes.count;
     end_of_jump := jump_addr + 2;
     distance := current_addr - end_of_jump;
-    assert(distance <= 127, "Long jumps arent supported yet");
+    assert(distance <= 127 && distance >= -128, "Long jumps arent supported yet");
     bytes[jump_addr + 1] = cast,no_check(u8)(distance.(s8));
+}
+
+mark_jump :: () -> int {
+    using context.current_procedure;
+    return bytes.count;
+}
+
+jump_to :: (addr: int) {
+    using context.current_procedure;
+    current_addr := bytes.count;
+    distance := current_addr - addr;
+    assert(distance <= 127 && distance >= -128, "Long jumps arent supported yet");
+    output_bytes(.JR_REL, cast,no_check(u8)(distance.(s8)));
 }
 
 add_call :: (proc: *Code_Procedure_Header) {

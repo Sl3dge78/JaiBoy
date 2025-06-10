@@ -49,7 +49,9 @@ gather :: (msg: *Message_Typechecked, procedures: *[..]*Code_Procedure_Header) {
                     log("type inst: %", decl.type_inst);
                 }
                 if decl.expression.kind == .PROCEDURE_HEADER {
-                    array_add(procedures, cast(*Code_Procedure_Header) decl.expression);
+                    proc_header := cast(*Code_Procedure_Header) decl.expression;
+                    if proc_header.procedure_flags & .ELSEWHERE then continue;
+                    array_add(procedures, proc_header);
                 } else {
                     error(tprint("Unhanded top level declaration: %", decl.expression.kind));
                     return;
@@ -81,6 +83,7 @@ generate_assembly :: (procedures: [..]*Code_Procedure_Header) -> bool, MBC1 {
     if errored { 
         return false, .{};
     }
+
     if !place_procedures(compiled) {
         return false, .{};
     }
@@ -89,6 +92,7 @@ generate_assembly :: (procedures: [..]*Code_Procedure_Header) -> bool, MBC1 {
         return false, .{};
     }
 
+    log_verbose("=====");
     for compiled {
         log_verbose("%:", it.procedure_header.name);
         builder: String_Builder;
@@ -323,7 +327,26 @@ compile_statement :: () {
                 error("The expression isn't a procedure header");
                 return;
             }
-            add_call(call.resolved_procedure_expression.(*Code_Procedure_Header));
+            header := call.resolved_procedure_expression.(*Code_Procedure_Header);
+            if header.procedure_flags & .ELSEWHERE {
+                log_verbose("Inserting % in %", header.name, context.current_procedure.procedure_header.name);
+                output_bytes(get_intrinsic(header.name));
+            } else {
+                add_call(header);
+            }
+        }
+
+        case .WHILE; {
+            w := node.(*Code_While);
+            initial_members := copy_members(,, temp);
+            loop_start := mark_jump();
+            jump_kind := compile_condition(,, current_node = w.condition);
+            if jump_kind == .NONE then return;
+            skip := begin_jump(jump_kind);
+            compile_block(,, current_node = w.block);
+            jump_to(loop_start);
+            end_jump(skip);
+            reconcile_members(initial_members);
         }
         case; {
             error(tprint("Unhandled statement kind: %", node.kind));
@@ -431,6 +454,7 @@ compile_expression :: (target_member: string) {
                 case #char "+"; instr = .ADD;
                 case #char "-"; {
                     instr = .SUB;
+                    move_member(left, .A);
                 }
                 case #char "&"; instr = .AND;
                 case #char "|"; instr = .OR;
@@ -439,10 +463,10 @@ compile_expression :: (target_member: string) {
                     return;
                 }
             }
-            move_member(left, .A);
-            output_bytes(arithmetic_instruction(instr, member_location(right))); 
+            other := ifx member_location(right) == .A then member_location(left) else member_location(right);
+            output_bytes(arithmetic_instruction(instr, other));
             set_member_location(target_member, .A);
-        }
+        } 
         case .IDENT; {
             ident := node.(*Code_Ident);
             type_member(target_member, get_member_type(ident.name));
@@ -508,14 +532,15 @@ compile_condition :: () -> Jump_Kind {
 
             left := push_temporary();
             defer pop_temporary(left);
-            ensure_register_empty(.A);
-            set_member_location(left, .A);
+            // ensure_register_empty(.A);
+            // set_member_location(left, .A);
             compile_expression(left,, current_node = bin_op.left); 
 
             output_bytes(arithmetic_instruction(.CP, member_location(right))); 
             if op == {
                 case .IS_EQUAL; return .IF_FALSE;
                 case .IS_NOT_EQUAL; return .IF_TRUE;
+                case #char "<"; return .IF_CARRY;
                 case; { 
                     error(tprint("Unhandled binary operator comparison '%'", operator_to_string2(op))); 
                     return .NONE;
@@ -555,10 +580,14 @@ Instruction_Kind :: enum u8 {
     JR_REL :: 0x18;
     JR_NZ_REL :: 0x20;
     JR_Z_REL :: 0x28;
+    JR_C_REL :: 0x38;
     LD_A_IMM :: 0x3E;
     HALT :: 0x76;
     RET :: 0xC9;
     CALL :: 0xCD;
+    DI :: 0xF3;
+    EI :: 0xFB;
+    RETI :: 0xD9;
     CP_D8 :: 0xFE;
 }
 
@@ -733,5 +762,6 @@ log_verbose :: (format: string, args: ..Any) #expand {
 #load "../common/opcodes.jai";
 #load "procedure.jai";
 #load "member.jai";
+#load "instrinsic.jai";
 
 #import "Hash_Table";

@@ -1,9 +1,12 @@
 
 main :: () {
-    a := 0;
-    if false {
-        a = 1;
-    } else {
-        a = 2;
-    }
+    di();
+    ei();
+    while true {}
 }
+
+// Special instructions intrinsics
+di :: () #elsewhere;
+ei :: () #elsewhere;
+halt :: () #elsewhere;
+reti :: () #elsewhere;
