@@ -535,6 +535,9 @@ compile_condition :: () -> Jump_Kind {
             // ensure_register_empty(.A);
             // set_member_location(left, .A);
             compile_expression(left,, current_node = bin_op.left); 
+            if member_location(right) != .A && member_location(left) != .A {
+                move_member(left, .A);
+            }
 
             output_bytes(arithmetic_instruction(.CP, member_location(right))); 
             if op == {
