@@ -2,6 +2,10 @@
 debug_window: *SDL_Window;
 state: Immediate_State;
 
+tex_height :: 8 * 8 * 3; // 8 lines * Tile height * 3 blocks
+tex_width  :: 8 * 16;    // Tile width * 16 tiles/line
+tile_texture: *SDL_Texture;
+
 hex :: (val: u16) -> FormatInt #expand {
     return formatInt(val, 16, 4);
 }
@@ -25,12 +29,14 @@ init_debug :: () {
     SDL_GetWindowPosition(debug_window, *x, *y);
     SDL_SetWindowPosition(debug_window, x - 500, y);
     state = init_immediate(debug_window);
+    tile_texture = SDL_CreateTexture(state.renderer, .RGBA8888, .STREAMING, tex_height, tex_width);
     log("init");
 }
 
 deinit_debug :: () {
     log("deinit");
     deinit_immediate(*state);
+    SDL_DestroyTexture(tile_texture);
     SDL_DestroyWindow(debug_window);
 }
 
@@ -90,7 +96,7 @@ draw_debug :: (gb : *Gameboy) {
     }
 
     // if ImGui.Begin("TILES") {
-    //     draw_tiles(gb);
+    draw_tiles(gb);
     // }
     // ImGui.End();
     //
@@ -187,6 +193,11 @@ draw_tiles :: (gb: *Gameboy) {
     }
     
     // @TODO
+    SDL_UpdateTexture(tile_texture, null, data.data, tex_width * size_of(Color));
+    dst := SDL_FRect.{
+        0, 0, tex_width, tex_height
+    };
+    SDL_RenderTexture(state.renderer, tile_texture, null, *dst);
     // glBindTexture(GL_TEXTURE_2D, tiles_tex);
     // glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, tex_width, tex_height, 0, GL_RGB, GL_UNSIGNED_BYTE, data.data);
     //
