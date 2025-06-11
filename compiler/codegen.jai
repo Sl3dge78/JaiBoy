@@ -330,7 +330,9 @@ compile_statement :: () {
             header := call.resolved_procedure_expression.(*Code_Procedure_Header);
             if header.procedure_flags & .ELSEWHERE {
                 log_verbose("Inserting % in %", header.name, context.current_procedure.procedure_header.name);
-                output_bytes(get_intrinsic(header.name));
+                ok, bytes := get_intrinsic(header.name, call);
+                if !ok return;
+                output_bytes(bytes);
             } else {
                 add_call(header);
             }
@@ -583,6 +585,7 @@ Instruction_Kind :: enum u8 {
     JR_REL :: 0x18;
     JR_NZ_REL :: 0x20;
     JR_Z_REL :: 0x28;
+    LD_SP_IMM_16 :: 0x31;
     JR_C_REL :: 0x38;
     LD_A_IMM :: 0x3E;
     HALT :: 0x76;
