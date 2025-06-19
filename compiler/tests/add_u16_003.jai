@@ -1,5 +1,5 @@
 
 main :: () {
-    a := 0xFE0F;
+    a := 0xFEFF;
     a += 0x01;
 }

@@ -296,7 +296,7 @@ compile_statement :: () {
                     compile_expression(temp,, current_node = bin_op.right);
 
                     arithmetic_instruction(get_instruction(op), left, temp);
-                    set_member_location(left, .A);
+                    set_member_location(left, slot(.A));
                 }
                 case; {
                     error(tprint("Unhandled binary operator statement %", operator_to_string2(xx op)));
@@ -318,7 +318,7 @@ compile_statement :: () {
                 ensure_register_empty(.A);
                 temp := push_temporary();
                 defer pop_temporary(temp);
-                set_member_location(temp, .A);
+                set_member_location(temp, slot(.A));
                 compile_expression(temp,, current_node = ret.arguments_sorted[0]);
             }
             output_bytes(.RET);
@@ -374,10 +374,10 @@ rvalue :: (node: *Code_Node) -> bool, string, temporary: bool {
                 case .POSTFIX_DEREFERENCE; #through;
                 case .POINTER_DEREFERENCE; {
                     temp := push_temporary();
-                    set_member_location(temp, .HL_INDIRECT);
+                    set_member_location(temp, slot_hl_indirect());
                     ok, name := rvalue(unary.subexpression);
                     if !ok then return false, "", false;
-                    move_member(name, .HL);
+                    move_member(name, slot(.HL));
                     return true, temp, true;
                 }
                 case; {
@@ -418,13 +418,13 @@ compile_expression :: (target_member: string) {
                         log_verbose("Typing member: % - %", target_member, type);
                         type_member(target_member, type);
                     }
-                    ensure_member_placed(target_member);
+                    reg := ensure_member_in_register(target_member);
                     if type == {
                         case .U8; {
-                            load_imm8(member_location(target_member), lit._u64.(u8));
+                            load_imm8(reg, lit._u64.(u8));
                         }
                         case .U16; {
-                            load_imm16(member_location(target_member), lit._u64.(u16));
+                            load_imm16(reg, lit._u64.(u16));
                         }
                         case; assert(false);
 
@@ -432,11 +432,11 @@ compile_expression :: (target_member: string) {
                     return;
                 }
                 case .BOOLEAN;{
-                    if member_location(target_member) == .NONE {
+                    if member_location(target_member).kind == .NONE {
                         type_member(target_member, .U8);
-                        move_member_to_next_available_slot(target_member);
                     }
-                    load_imm8(member_location(target_member), lit._u64.(u8));
+                    reg := ensure_member_in_register(target_member);
+                    load_imm8(reg, lit._u64.(u8));
                     return;
                 }
                 case; {
@@ -467,17 +467,18 @@ compile_expression :: (target_member: string) {
                 }
             }
             arithmetic_instruction(instr, left, right);
-            if !is_wide(member_location(target_member)) {
-                set_member_location(target_member, .A);
+            if !is_wide(target_member) {
+                set_member_location(target_member, slot(.A));
             } else {
-                set_member_location(target_member, .HL);
+                set_member_location(target_member, slot(.HL));
             }
         } 
         case .IDENT; {
             ident := node.(*Code_Ident);
             type_member(target_member, get_member_type(ident.name));
-            ensure_member_placed(target_member);
-            load_instruction(member_location(target_member), member_location(ident.name));
+            l := ensure_member_in_register(target_member);
+            r := ensure_member_in_register(ident.name);
+            load_instruction(l, r);
         }
         case .PROCEDURE_CALL; {
             call := node.(*Code_Procedure_Call);
@@ -490,13 +491,13 @@ compile_expression :: (target_member: string) {
                 return;
             }
             if call.num_return_values_received != 0 {
-                if member_location(target_member) != .A { 
+                if member_location(target_member) != slot(.A) { 
                     ensure_register_empty(.A);
                 }
             }
             add_call(call.resolved_procedure_expression.(*Code_Procedure_Header));
             if call.num_return_values_received != 0 {
-                set_member_location(target_member, .A);
+                set_member_location(target_member, slot(.A));
             }
         }
         case .CAST; {
@@ -546,8 +547,10 @@ compile_condition :: () -> [..]int {
             left := push_temporary();
             defer pop_temporary(left);
             compile_expression(left,, current_node = bin_op.left); 
+            r := ensure_member_in_register(right);
+            l := ensure_member_in_register(left);
 
-            if !is_wide(member_location(right)) && !is_wide(member_location(left)) {
+            if !is_wide(right) && !is_wide(left) {
                 jump_kind: Jump_Kind;
                 if op == {
                     case .IS_EQUAL; jump_kind =  .IF_NON_ZERO;
@@ -703,14 +706,20 @@ Arithmetic_Instruction :: enum u8 {
 }
 
 arithmetic_instruction :: (kind: Arithmetic_Instruction, left: string, right: string) {
-    r_loc := member_location(right);
-    l_loc := member_location(left);
+    r_slot := member_location(right);
+    assert(r_slot.kind == .REGISTER);
+    l_slot := member_location(left);
+    assert(l_slot.kind == .REGISTER);
+
+    r_loc = r_slot.register;
+    l_loc = l_slot.register;
     assert(!(kind == .CP && (is_wide(r_loc) || is_wide(l_loc))), "When outputting compares, please do it with small registers");
     if !is_wide(r_loc) && !is_wide(l_loc) {
         if kind == .SUB || (r_loc != .A && l_loc != .A) {
-            move_member(left, .A);
+            move_member(left, slot(.A));
             l_loc = .A;
         }
+        r_loc= member_location(right);
         arithmetic_instruction(kind, l_loc, r_loc);
     } else {
         ensure_register_empty(.HL);
@@ -765,7 +774,7 @@ Operation_Target :: enum {
     A :: 7;
 }
 
-Register :: enum_flags {
+Register :: enum_flags u8 {
     NONE:: 0;
     A :: 1;
     B :: 2;
@@ -778,8 +787,6 @@ Register :: enum_flags {
     BC :: 2 | 4;
     DE :: 8 | 16;
     HL :: 32 | 64;
-
-    HL_INDIRECT :: 128;
 }
 
 register_preference :: Register.[
@@ -799,11 +806,11 @@ wide_register_preference :: Register.[
 ];
 
 get_lo :: (r: Register) -> Register {
-    return r & .C | r & .E | r & .L;
+    return (r & .C) | (r & .E) | (r & .L);
 }
 
 get_hi :: (r: Register) -> Register {
-    return r & .B | r & .D | r & .H;
+    return (r & .B) | (r & .D) | (r & .H);
 }
 
 is_wide :: (r: Register) -> bool {
@@ -824,7 +831,6 @@ to_opcode :: (r: Register) -> Operation_Target {
     if r & .E return .E;
     if r & .H return .H;
     if r & .L return .L;
-    if r & .HL_INDIRECT return .HL_INDIRECT;
     assert(false, "r: %", r);
     return 0;
 }

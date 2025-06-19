@@ -1,5 +1,7 @@
 
 debug_window: *SDL_Window;
+DEBUG_WINDOW_W :: 500;
+DEBUG_WINDOW_H :: 500;
 state: Immediate_State;
 
 DEBUG_WINDOW_WIDTH :: 500;
@@ -8,6 +10,9 @@ DEBUG_WINDOW_HEIGHT :: 500;
 TILES_TEXTURE_WIDTH :: 8 * 16;    // Tile width * 16 tiles/line
 TILES_TEXTURE_HEIGHT :: 8 * 8 * 3; // 8 lines * Tile height * 3 blocks
 tile_texture: *SDL_Texture;
+
+MAP_SIZE:: 32 * 8;
+map_texture: *SDL_Texture;
 
 hex :: (val: u16) -> FormatInt #expand {
     return formatInt(val, 16, 4);
@@ -32,7 +37,8 @@ init_debug :: () {
     SDL_GetWindowPosition(debug_window, *x, *y);
     SDL_SetWindowPosition(debug_window, x - DEBUG_WINDOW_WIDTH, y);
     state = init_immediate(debug_window);
-    tile_texture = SDL_CreateTexture(state.renderer, .RGBA8888, .STREAMING, TILES_TEXTURE_WIDTH, TILES_TEXTURE_HEIGHT);
+    tile_texture = SDL_CreateTexture(state.renderer, .ABGR8888, .STREAMING, TILES_TEXTURE_WIDTH, TILES_TEXTURE_HEIGHT);
+    map_texture = SDL_CreateTexture(state.renderer, .ABGR8888, .STREAMING, MAP_SIZE, MAP_SIZE);
     log("init");
 }
 
@@ -40,6 +46,7 @@ deinit_debug :: () {
     log("deinit");
     deinit_immediate(*state);
     SDL_DestroyTexture(tile_texture);
+    SDL_DestroyTexture(map_texture);
     SDL_DestroyWindow(debug_window);
 }
 
@@ -98,10 +105,8 @@ draw_debug :: (gb : *Gameboy) {
     }
 
     draw_tiles(gb);
+    draw_map(gb);
 
-    //     draw_map(gb);
-    //
-    //
     // if ImGui.Begin("Callstack") {
     //     for gb.call_stack {
     //         ImGui.Text("FROM: 0x% - TO: 0x%", hex(it.from), hex(it.to));
@@ -187,10 +192,12 @@ draw_tiles :: (gb: *Gameboy) {
         ptr += 2;
     }
     
+    cursor(DEBUG_WINDOW_W - TILES_TEXTURE_WIDTH, 130);
+    text("Tiles");
     SDL_UpdateTexture(tile_texture, null, data.data, TILES_TEXTURE_WIDTH * size_of(Color));
     dst := SDL_FRect.{
         DEBUG_WINDOW_WIDTH - TILES_TEXTURE_WIDTH,
-        DEBUG_WINDOW_HEIGHT - TILES_TEXTURE_HEIGHT, 
+        142,
         TILES_TEXTURE_WIDTH,
         TILES_TEXTURE_HEIGHT
     };
@@ -200,33 +207,35 @@ draw_tiles :: (gb: *Gameboy) {
 draw_map :: (gb: *Gameboy) {
     // if ImGui.Begin("MAP") {
     //     ImGui.Text("MAP 1");
-    //     MAP_SIZE:: 32 * 8;
-    //     data: [MAP_SIZE * MAP_SIZE]Color;
-    //
-    //     LCDC := gb.mem[IO_LCDC];
-    //     tile_data_select: bool = (LCDC >> 4 & 1) == 1;
-    //     base_addr: u16 = 0x9800;
-    //
-    //     for y : 0..31 {
-    //         for x : 0..31 {
-    //             addr := base_addr + x + y * 32;
-    //             tile_id := gb.mem[addr];
-    //             for line : 0..7 {
-    //                 tl := get_tile_line(gb, tile_id, tile_data_select, xx line);
-    //                 for row: 0..7 {
-    //                     pixel: u8 = (tl.data_2 >> (7 - row) & 1);
-    //                     pixel <<= 1;
-    //                     pixel |= (tl.data_1 >> (7 - row) & 1);
-    //                     color := palette[pixel];
-    //
-    //                     arx := (x * 8) + row;
-    //                     ary := (y * 8) + line;
-    //
-    //                     data[arx + (ary * MAP_SIZE)] = color;
-    //                 }
-    //             }
-    //         }
-    //     }
+    data: [MAP_SIZE * MAP_SIZE]Color;
+
+    LCDC := gb.mem[IO_LCDC];
+    tile_data_select: bool = (LCDC >> 4 & 1) == 1;
+    base_addr: u16 = 0x9800;
+
+    for y : 0..31 {
+        for x : 0..31 {
+            addr := base_addr + x + y * 32;
+            tile_id := gb.mem[addr];
+            for line : 0..7 {
+                tl := get_tile_line(gb, tile_id, tile_data_select, xx line);
+                for row: 0..7 {
+                    pixel: u8 = (tl.data_2 >> (7 - row) & 1);
+                    pixel <<= 1;
+                    pixel |= (tl.data_1 >> (7 - row) & 1);
+                    color := palette[pixel];
+
+                    arx := (x * 8) + row;
+                    ary := (y * 8) + line;
+
+                    data[arx + (ary * MAP_SIZE)] = color;
+                }
+            }
+        }
+    }
+    SDL_UpdateTexture(map_texture, null, data.data, MAP_SIZE * size_of(Color));
+    dst := SDL_FRect.{ DEBUG_WINDOW_W - TILES_TEXTURE_WIDTH - MAP_SIZE, 142, MAP_SIZE, MAP_SIZE };
+    SDL_RenderTexture(state.renderer, map_texture, null, *dst);
     //
     //     glBindTexture(GL_TEXTURE_2D, map_1_tex);
     //     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);

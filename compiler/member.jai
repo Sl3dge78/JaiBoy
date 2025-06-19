@@ -1,8 +1,53 @@
 Member_Table :: Table(string, Member);
 
 Member :: struct {
-    slot: Register;
+    slot: Member_Slot;
     type: GB_Type;
+    hot: u32;
+}
+
+Member_Slot :: struct {
+    kind : enum {
+        NONE;
+        REGISTER;
+        STACK;
+        HL_INDIRECT;
+    };
+    union {
+        register: Register;
+        rel_address: u8;
+    };
+}
+
+slot_none :: () -> Member_Slot {
+    return .{ .NONE };
+}
+
+slot_hl_indirect :: () -> Member_Slot {
+    return .{ .HL_INDIRECT };
+}
+
+slot :: (r: Register) -> Member_Slot {
+    return .{ kind = .REGISTER, register = r };
+}
+
+operator == :: (r: Member_Slot, l: Member_Slot) -> bool {
+    if r.kind != l.kind then return false;
+    if r.kind == {
+        case .REGISTER; return r.register == l.register;
+        case .STACK; return r.rel_address == l.rel_address;
+        case; return true;
+    }
+}
+
+// Returns true if the slots collide
+overlapping :: (r: Member_Slot, l: Member_Slot) -> bool {
+    if r.kind != l.kind return false;
+    if r.kind == {
+        case .REGISTER; return (r.register & l.register) != 0;
+        case .STACK; return r.rel_address == l.rel_address;
+        case; return true;
+    }
 }
 
 GB_Type :: enum {
@@ -13,7 +58,7 @@ GB_Type :: enum {
 }
 
 member :: (type: GB_Type) -> Member {
-    return .{ .NONE, type };
+    return .{ slot_none(), type };
 }
 
 to_gb_type :: (ti: *Type_Info) -> GB_Type {
@@ -38,6 +83,20 @@ to_gb_type :: (ti: *Type_Info) -> GB_Type {
             error(tprint("Unhandled type: %", ti.*));
             return .NONE;
         }
+    }
+}
+
+Register_Size :: enum {
+    BYTE;
+    SHORT;
+}
+
+to_size :: (t: GB_Type) -> Register_Size {
+    if #complete t == {
+        case .U8; return .BYTE;
+        case .U16; #through;
+        case .POINTER; return .SHORT;
+        case .NONE; assert(false); return .SHORT;
     }
 }
 
@@ -83,9 +142,13 @@ get_member_type :: (name: string) -> GB_Type {
     return get_member(name).type;
 }
 
-set_member_location :: (name: string, slot: Register) {
-    assert(slot != .NONE);
-    ensure_register_empty(slot);
+is_wide :: (name: string) -> bool {
+    return to_size(get_member(name).type) == .SHORT;
+}
+
+set_member_location :: (name: string, slot: Member_Slot) {
+    assert(slot.kind != .NONE);
+    ensure_slot_empty(slot);
     member := get_member(name);
     member.slot = slot;
 }
@@ -170,11 +233,21 @@ check_members :: (original: Member_Table) -> bool {
 }
 
 // If member is not place, will be placed
-member_location :: (name: string) -> Register {
+member_location :: (name: string) -> Member_Slot {
     using context.current_procedure;
     ok, member := table_find_new(*members, name);
     assert(ok, "Member % couldn't be found", name);
     return member.slot;
+}
+
+ensure_slot_empty :: (s: Member_Slot) {
+    using context.current_procedure;
+    assert(s.kind != .NONE);
+    for *members {
+        if overlapping(it.slot, s) {
+            move_member_to_next_available_slot(it);
+        }
+    }
 }
 
 ensure_register_empty :: (r: Register) {
@@ -198,54 +271,92 @@ ensure_register_empty :: (r: Register) {
     }
 }
 
-move_member :: (name: string, new_slot: Register) {
+move_member :: (name: string, new_slot: Member_Slot) {
     using context.current_procedure;
-    assert(new_slot != .NONE);
+    assert(new_slot.kind != .NONE);
     member := get_member(name);
     if member.slot == new_slot then return; // Nothing to do
-    ensure_register_empty(new_slot);
+    ensure_slot_empty(new_slot);
     log_verbose("Moving % to % (was in %)", name, new_slot, member.slot);
-    if member.slot != .NONE {
-        load_instruction(new_slot, member.slot);
+
+    if member.slot.kind == {
+        case .NONE; {}
+        case .REGISTER; {
+            if new_slot.kind == {
+                case .REGISTER; load_instruction(new_slot.register, member.slot.register);
+                case; {
+                    assert(false, "Unhandled member move % -> %", member.slot, new_slot);
+                    return;
+                }
+            }
+        }
+        case; {
+            assert(false, "Unhandled member move % -> %", member.slot, new_slot);
+            return;
+        }
     }
     member.slot = new_slot;
 }
 
 ensure_member_placed :: (name: string) {
-    if get_member(name).slot != 0 then return;
+    if get_member(name).slot.kind != .NONE then return;
     move_member_to_next_available_slot(name);
+}
+
+ensure_member_in_register :: (name: string) -> Register {
+    member := get_member(name);
+    member.hot += 1;
+    size := to_size(member.type);
+    if member.slot.kind == .REGISTER then return member.slot.register;
+    found, reg := find_next_available_register(size);
+    if found {
+        move_member(name, slot(reg));
+        return reg;
+    } else {
+        if #complete size == {
+            case .BYTE; 
+                ensure_register_empty(.A);
+                move_member(name, slot(.A));
+                return .A;
+            case .SHORT; 
+                ensure_register_empty(.HL);
+                move_member(name, slot(.HL));
+                return .HL;
+        }
+    }
+}
+
+coldest_member_in_registers :: () -> string {
+    using context.current_procedure;
+    result: string;
+    coldest := U32_MAX;
+    for members {
+        if it.slot.kind != .REGISTER then continue;
+        if it.hot < coldest {
+            result = it_index;
+            coldest = it.hot;
+        }
+    }
 }
 
 move_member_to_next_available_slot :: (name: string) {
     using context.current_procedure;
     member := get_member(name);
+    new_slot : Member_Slot;
     if member.type == {
-        case .NONE; {
-            assert(false, "I don't know how to place a non typed member");
-        }
+        case .NONE; assert(false, "I don't know how to place a non typed member");
         case .U8; {
-            ok, slot := find_next_available_register();
+            ok:, new_slot = find_next_available(.BYTE);
             assert(ok, "Too many members");
-            log_verbose("Moving % to % (was in %)", name, slot, member.slot);
-            if member.slot != .NONE {
-                load_instruction(slot, member.slot);
-            }
-            member.slot = slot;
         } 
         case .POINTER; #through;
         case .U16; {
-            ok, slot := find_next_available_wide();
+            ok:, new_slot = find_next_available(.SHORT);
             assert(ok, "Too many members");
-            log_verbose("Moving % to % (was in %)", name, slot, member.slot);
-            if member.slot != .NONE {
-                load_instruction(slot, member.slot);
-            }
-            member.slot = slot;
         }
-        case; {
-            assert(false, "Todo (type %)", member.type);
-        }
+        case; assert(false, "Todo (type %)", member.type);
     }
+    move_member(name, slot);
 }
 
 get_member_at :: (r: Register) -> bool, string {
@@ -265,9 +376,15 @@ print_members :: () {
     log_verbose("{ % }", builder_to_string(*builder));
 }
 
-find_next_available_register :: () -> bool, Register {
+find_next_available_register :: (size: Register_Size) -> bool, Register {
     using context.current_procedure;
-    for r: register_preference {
+    pref: []Register;
+    if size == {
+        case .BYTE; pref = register_preference;
+        case .SHORT; pref =  wide_register_preference;
+    }
+
+    for r: pref {
         for members {
             if it.slot == xx r then continue r;
         }
@@ -278,15 +395,3 @@ find_next_available_register :: () -> bool, Register {
     return false, 0;
 }
 
-find_next_available_wide :: () -> bool, Register {
-    using context.current_procedure;
-    print_members();
-    for r: wide_register_preference {
-        for members {
-            if (it.slot & r) == 1 then continue r;
-        }
-        return true, r;
-    }
-    assert(false, "Unable to find a free sport for member");
-    return false, 0;
-}
