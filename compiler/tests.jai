@@ -93,6 +93,8 @@ check_register :: (gb: *Gameboy, reg: Register, val: u8, builder: *String_Builde
         case .A; reg_val = gb.cpu.a;
         case .B; reg_val = gb.cpu.b;
         case .C; reg_val = gb.cpu.c;
+        case .H; reg_val = gb.cpu.h;
+        case .L; reg_val = gb.cpu.l;
         case; {
             assert(false, "Register test not implemented");
             return false;
@@ -102,7 +104,7 @@ check_register :: (gb: *Gameboy, reg: Register, val: u8, builder: *String_Builde
     if !ok {
         print_to_builder(builder, "> Register % is %. Expected %.\n", reg, reg_val, val);
         print_to_builder(builder, "Here's the state of the cpu: \n");
-        print_to_builder(builder, "a: %, b: %, c: %, d: %, e: %", gb.cpu.a, gb.cpu.b, gb.cpu.c, gb.cpu.d, gb.cpu.e);
+        print_to_builder(builder, "a: %, b: %, c: %, d: %, e: %, h: %, l: %", gb.cpu.a, gb.cpu.b, gb.cpu.c, gb.cpu.d, gb.cpu.e, gb.cpu.h, gb.cpu.l);
     }
     return ok;
 }
@@ -144,4 +146,16 @@ test_programs :: () {
     test_program("tests/if_006.jai", gb,cpu(.A, 0));
     test_program("tests/memory_write_001.jai", gb,cpu(.A, 0));
     test_program("tests/while_001.jai", gb,cpu(.B, 10));
+    test_program("tests/if_wide_001.jai", gb,cpu(.A, 69));
+    test_program("tests/if_wide_002.jai", gb,cpu(.A, 69));
+    test_program("tests/if_wide_003.jai", gb,cpu(.A, 69));
+    test_program("tests/if_wide_004.jai", gb,cpu(.A, 69));
+    test_program("tests/if_wide_005.jai", gb,cpu(.A, 69));
+    test_program("tests/if_wide_006.jai", gb,cpu(.A, 69));
+    test_program("tests/add_u16_001.jai", gb,cpu(.H, 0xFE), cpu(.L, 0x10));
+    test_program("tests/add_u16_002.jai", gb,cpu(.H, 0xFF), cpu(.L, 0x00));
+    test_program("tests/add_u16_003.jai", gb,cpu(.H, 0xFF), cpu(.L, 0x00));
+    test_program("tests/less_or_equal_001.jai", gb,cpu(.A, 69));
+    test_program("tests/less_or_equal_002.jai", gb,cpu(.A, 69));
+    test_program("tests/sub_002.jai", gb,cpu(.A, 1));
 }

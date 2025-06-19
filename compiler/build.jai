@@ -1,8 +1,8 @@
 #run build_and_output_rom();
 
 build_and_output_rom :: () {
-    cart := build_cart("test_bed.jai",, log_level = .VERBOSE);
-    // cart := build_cart("tests/while_001.jai",, log_level = .VERBOSE);
+    // cart := build_cart("test_bed.jai",, log_level = .VERBOSE);
+    cart := build_cart("tests/sub_002.jai",, log_level = .VERBOSE);
 
     filename := "output_rom.gb";
     write_entire_file(filename, cart.contents.data, cart.contents.count);

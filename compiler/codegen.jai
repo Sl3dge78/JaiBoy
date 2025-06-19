@@ -237,9 +237,8 @@ compile_statement :: () {
                 return ;
             }
             // If expects the result of the condition to be in .A
-            jump_kind := compile_condition(,, current_node = code.condition);
+            jumps := compile_condition(,, current_node = code.condition);
             initial_members := copy_members(,, temp);
-            skip_then := begin_jump(jump_kind); 
 
             compile_block(,, current_node = code.then_block);
             then_members := copy_members(,, temp);
@@ -247,13 +246,17 @@ compile_statement :: () {
             else_jump : int = -1;  
             if code.else_block != null {
                 skip_else := begin_jump(.ALWAYS);
-                end_jump(skip_then);
+                for jumps {
+                    end_jump(it);
+                }
                 compile_block(,, current_node = code.else_block);
                 reconcile_members(then_members);
                 end_jump(skip_else);
             } else {
                 reconcile_members(initial_members);
-                end_jump(skip_then);
+                for jumps {
+                    end_jump(it);
+                }
             }
 
         }
@@ -292,8 +295,8 @@ compile_statement :: () {
                     defer pop_temporary(temp);
                     compile_expression(temp,, current_node = bin_op.right);
 
-                    move_member(left, .A);
-                    output_bytes(arithmetic_instruction(get_instruction(op), member_location(temp)));
+                    arithmetic_instruction(get_instruction(op), left, temp);
+                    set_member_location(left, .A);
                 }
                 case; {
                     error(tprint("Unhandled binary operator statement %", operator_to_string2(xx op)));
@@ -342,12 +345,13 @@ compile_statement :: () {
             w := node.(*Code_While);
             initial_members := copy_members(,, temp);
             loop_start := mark_jump();
-            jump_kind := compile_condition(,, current_node = w.condition);
-            if jump_kind == .NONE then return;
-            skip := begin_jump(jump_kind);
+            jumps := compile_condition(,, current_node = w.condition);
+            if jumps.count == 0 then return; 
             compile_block(,, current_node = w.block);
             jump_to(loop_start);
-            end_jump(skip);
+            for jumps {
+                end_jump(it);
+            }
             reconcile_members(initial_members);
         }
         case; {
@@ -454,10 +458,7 @@ compile_expression :: (target_member: string) {
             instr: Arithmetic_Instruction;
             if op == {
                 case #char "+"; instr = .ADD;
-                case #char "-"; {
-                    instr = .SUB;
-                    move_member(left, .A);
-                }
+                case #char "-"; instr = .SUB;
                 case #char "&"; instr = .AND;
                 case #char "|"; instr = .OR;
                 case; { 
@@ -465,9 +466,12 @@ compile_expression :: (target_member: string) {
                     return;
                 }
             }
-            other := ifx member_location(right) == .A then member_location(left) else member_location(right);
-            output_bytes(arithmetic_instruction(instr, other));
-            set_member_location(target_member, .A);
+            arithmetic_instruction(instr, left, right);
+            if !is_wide(member_location(target_member)) {
+                set_member_location(target_member, .A);
+            } else {
+                set_member_location(target_member, .HL);
+            }
         } 
         case .IDENT; {
             ident := node.(*Code_Ident);
@@ -517,40 +521,86 @@ compile_expression :: (target_member: string) {
     }
 }
 
-compile_condition :: () -> Jump_Kind {
+// Returns jumps addresses to be fixed up to the end
+// of the if true
+compile_condition :: () -> [..]int {
     node := context.current_node;
+    jumps: [..]int;
     if node.kind == {
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
             op : Operator_Type = xx bin_op.operator_type;
             right := push_temporary();
             defer pop_temporary(right);
-            // arent U8
+
             compile_expression(right,, current_node = bin_op.right);
-            if get_member_type(right) != .U8 {
-                error(tprint("Comparing % isn't supported yet", get_member_type(right)));
-                return .NONE;
+            if get_member_type(right) == {
+                case .U8; #through;
+                case .U16; { }
+                case; {
+                    error(tprint("Comparing % isn't supported yet", get_member_type(right)));
+                    return jumps;
+                }
             }
 
             left := push_temporary();
             defer pop_temporary(left);
-            // ensure_register_empty(.A);
-            // set_member_location(left, .A);
             compile_expression(left,, current_node = bin_op.left); 
-            if member_location(right) != .A && member_location(left) != .A {
-                move_member(left, .A);
-            }
 
-            output_bytes(arithmetic_instruction(.CP, member_location(right))); 
-            if op == {
-                case .IS_EQUAL; return .IF_FALSE;
-                case .IS_NOT_EQUAL; return .IF_TRUE;
-                case #char "<"; return .IF_CARRY;
-                case; { 
-                    error(tprint("Unhandled binary operator comparison '%'", operator_to_string2(op))); 
-                    return .NONE;
+            if !is_wide(member_location(right)) && !is_wide(member_location(left)) {
+                jump_kind: Jump_Kind;
+                if op == {
+                    case .IS_EQUAL; jump_kind =  .IF_NON_ZERO;
+                    case .IS_NOT_EQUAL; jump_kind =  .IF_ZERO;
+                    case #char "<"; jump_kind =  .IF_CARRY;
+                    case; { 
+                        error(tprint("Unhandled short binary operator comparison '%'", operator_to_string2(op))); 
+                        return jumps;
+                    }
+                }
+                arithmetic_instruction(.CP, left, right); 
+                array_add(*jumps, begin_jump(jump_kind));
+            } else { // One or both is wide
+                lo_l, hi_l := split_register(member_location(left));
+                lo_r, hi_r := split_register(member_location(right));
+                if op == {
+                    case .IS_EQUAL; {
+                        if hi_l == .NONE || hi_r == .NONE {
+                            // They are always non equal
+                            array_add(*jumps, begin_jump(.ALWAYS));
+                            return jumps;
+                        }
+                        arithmetic_instruction(.CP, lo_l, lo_r);
+                        array_add(*jumps, begin_jump(.IF_NON_ZERO));
+                        arithmetic_instruction(.CP, hi_l, hi_r);
+                        array_add(*jumps, begin_jump(.IF_NON_ZERO));
+                    } 
+                    case .IS_NOT_EQUAL; {
+                        if hi_l == .NONE || hi_r == .NONE {
+                            // They are always non equal
+                            return jumps;
+                        }
+                        arithmetic_instruction(.CP, lo_l, lo_r);
+                        array_add(*jumps, begin_jump(.IF_ZERO));
+                        arithmetic_instruction(.CP, hi_l, hi_r);
+                        array_add(*jumps, begin_jump(.IF_ZERO));
+                    }
+                    case .LESS_OR_EQUAL; {
+                        if hi_l == .NONE {
+                            // Always below
+                            return jumps;
+                        }
+                        arithmetic_instruction(.SUB, left, right);
+                        array_add(*jumps, begin_jump(.IF_CARRY));
+                        array_add(*jumps, begin_jump(.IF_NON_ZERO));
+                    }
+                    case; {
+                        error(tprint("Unhandled wide binary operator comparison '%'", operator_to_string2(op))); 
+                        return jumps;
+                    }
                 }
             }
+            return jumps;
 
         }
         case .IDENT; #through;
@@ -562,11 +612,12 @@ compile_condition :: () -> Jump_Kind {
 
             compile_expression(temp,, current_node = node);
             output_bytes(.CP_D8, 0x1);
-            return .IF_FALSE;
+            array_add(*jumps, begin_jump(.IF_NON_ZERO));
+            return jumps;
         }
         case; {
             error(tprint("Unhandled condition expression kind: %", node.kind));
-            return .NONE;
+            return jumps;
         }
 
     }
@@ -603,13 +654,14 @@ load_instruction :: (dst_register: Register, src_register: Register) {
         src := to_opcode(src_register);
         assert(!(src == .HL_INDIRECT && dst == .HL_INDIRECT), "This is HALT");
         assert(dst <= .A);
-        assert(dst != src, "This is a dumb and useless operation");
+        if dst == src then return;
         output_bytes(0x40 + (dst.(u8) * 8) + src.(u8));
     } else {
         lo_src, hi_src := split_register(src_register);
         lo_dst, hi_dst := split_register(dst_register);
         assert(lo_src != .NONE && lo_dst != .NONE, "One of the registers is None. src: % dst: %", lo_src, lo_dst);
         assert(hi_dst != .NONE, "Copying a wide register to a small one!");
+        log_verbose("Copying from % to %", src_register, dst_register);
         load_instruction(lo_dst, lo_src);
         if hi_src != .NONE {
             load_instruction(hi_dst, hi_src);
@@ -650,9 +702,56 @@ Arithmetic_Instruction :: enum u8 {
     CP  :: 0xB8;
 }
 
-arithmetic_instruction :: (kind: Arithmetic_Instruction, src: Register) -> u8 {
+arithmetic_instruction :: (kind: Arithmetic_Instruction, left: string, right: string) {
+    r_loc := member_location(right);
+    l_loc := member_location(left);
+    assert(!(kind == .CP && (is_wide(r_loc) || is_wide(l_loc))), "When outputting compares, please do it with small registers");
+    if !is_wide(r_loc) && !is_wide(l_loc) {
+        if kind == .SUB || (r_loc != .A && l_loc != .A) {
+            move_member(left, .A);
+            l_loc = .A;
+        }
+        arithmetic_instruction(kind, l_loc, r_loc);
+    } else {
+        ensure_register_empty(.HL);
+        ensure_register_empty(.A);
+        lo_l, hi_l := split_register(member_location(left));
+        lo_r, hi_r := split_register(member_location(right));
+        load_instruction(.A, lo_l);
+        arithmetic_instruction(kind, .A, lo_r);
+        load_instruction(.L, .A);
+        other: Register;
+
+        if hi_r != .NONE {
+            other = hi_r;
+        } else {
+            ensure_register_empty(.B);
+            other = .B;
+            load_imm8(other, 0);
+        }
+
+        if hi_l != .NONE {
+            load_instruction(.A, hi_l);
+        } else {
+            load_imm8(.A, 0);
+        }
+
+        if kind == .ADD {
+            arithmetic_instruction(.ADC, .A, other);
+        } else if kind == .SUB {
+            arithmetic_instruction(.SBC, .A, other);
+        } else {
+            error(tprint("Unhandled wide arithmetic instruction: %", kind));
+            return;
+        }
+        load_instruction(.H, .A);
+    }
+}
+
+arithmetic_instruction :: (kind: Arithmetic_Instruction, left: Register, right: Register) {
+    src := ifx left == .A then right else left;
     tgt := to_opcode(src);
-    return kind.(u8) + tgt.(u8);
+    output_bytes(kind.(u8) + tgt.(u8));
 }
 
 Operation_Target :: enum {

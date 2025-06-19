@@ -181,12 +181,19 @@ ensure_register_empty :: (r: Register) {
     using context.current_procedure;
     assert(r != .NONE);
     for *members {
-        if it.slot == r {
-            ok, new := find_next_available_register();
-            log_verbose("Making sure % is empty by moving %", r, it_index);
-            load_instruction(new, r);
-            it.slot = new;
-            return;
+        if it.slot & r {
+            if !is_wide(it.slot) {
+                ok, new := find_next_available_register();
+                log_verbose("Making sure % is empty by moving %", r, it_index);
+                load_instruction(new, r);
+                it.slot = new;
+            } else {
+                ok, new := find_next_available_wide();
+                log_verbose("Making sure % is empty by moving %", r, it_index);
+                load_instruction(new, r);
+                it.slot = new;
+            }
+            if !is_wide(r) then return;
         }
     }
 }
@@ -273,6 +280,7 @@ find_next_available_register :: () -> bool, Register {
 
 find_next_available_wide :: () -> bool, Register {
     using context.current_procedure;
+    print_members();
     for r: wide_register_preference {
         for members {
             if (it.slot & r) == 1 then continue r;

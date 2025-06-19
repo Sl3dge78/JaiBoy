@@ -88,8 +88,8 @@ disassemble_bytes :: (builder: *String_Builder, bytes: []u8, new_line : bool, ba
 }
 
 Jump_Kind :: enum {
-    IF_FALSE;
-    IF_TRUE;
+    IF_NON_ZERO;
+    IF_ZERO;
     ALWAYS;
     IF_CARRY;
 
@@ -100,8 +100,8 @@ begin_jump :: (kind: Jump_Kind) -> int {
     using context.current_procedure;
     addr := bytes.count;
     if #complete kind == {
-        case .IF_FALSE; output_bytes(.JR_NZ_REL, 0x00);
-        case .IF_TRUE; output_bytes(.JR_Z_REL, 0x00);
+        case .IF_NON_ZERO; output_bytes(.JR_NZ_REL, 0x00);
+        case .IF_ZERO; output_bytes(.JR_Z_REL, 0x00);
         case .IF_CARRY; output_bytes(.JR_C_REL, 0x00);
         case .ALWAYS; output_bytes(.JR_REL, 0x00);
         case .NONE; assert(false, "Invalid jump");
