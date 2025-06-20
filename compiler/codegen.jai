@@ -206,6 +206,7 @@ compile_block :: () {
 
     for block.statements {
         compile_statement(,, current_node = it);
+        cool_members();
         if context.current_procedure.errors.count > 0 then break;
     }
 
@@ -238,10 +239,10 @@ compile_statement :: () {
             }
             // If expects the result of the condition to be in .A
             jumps := compile_condition(,, current_node = code.condition);
-            initial_members := copy_members(,, temp);
+            initial_members := copy_slots(,, temp);
 
             compile_block(,, current_node = code.then_block);
-            then_members := copy_members(,, temp);
+            then_members := copy_slots(,, temp);
 
             else_jump : int = -1;  
             if code.else_block != null {
@@ -250,10 +251,10 @@ compile_statement :: () {
                     end_jump(it);
                 }
                 compile_block(,, current_node = code.else_block);
-                reconcile_members(then_members);
+                reconcile_slots(then_members);
                 end_jump(skip_else);
             } else {
-                reconcile_members(initial_members);
+                reconcile_slots(initial_members);
                 for jumps {
                     end_jump(it);
                 }
@@ -296,7 +297,7 @@ compile_statement :: () {
                     compile_expression(temp,, current_node = bin_op.right);
 
                     arithmetic_instruction(get_instruction(op), left, temp);
-                    set_member_location(left, slot(.A));
+                    set_member_location(left, .A);
                 }
                 case; {
                     error(tprint("Unhandled binary operator statement %", operator_to_string2(xx op)));
@@ -315,10 +316,10 @@ compile_statement :: () {
                 return;
             }
             if ret.arguments_sorted.count == 1 {
-                ensure_register_empty(.A);
+                force_empty(.A);
                 temp := push_temporary();
                 defer pop_temporary(temp);
-                set_member_location(temp, slot(.A));
+                set_member_location(temp, .A);
                 compile_expression(temp,, current_node = ret.arguments_sorted[0]);
             }
             output_bytes(.RET);
@@ -343,7 +344,7 @@ compile_statement :: () {
 
         case .WHILE; {
             w := node.(*Code_While);
-            initial_members := copy_members(,, temp);
+            initial_members := copy_slots(,, temp);
             loop_start := mark_jump();
             jumps := compile_condition(,, current_node = w.condition);
             if jumps.count == 0 then return; 
@@ -352,7 +353,7 @@ compile_statement :: () {
             for jumps {
                 end_jump(it);
             }
-            reconcile_members(initial_members);
+            reconcile_slots(initial_members);
         }
         case; {
             error(tprint("Unhandled statement kind: %", node.kind));
@@ -373,11 +374,16 @@ rvalue :: (node: *Code_Node) -> bool, string, temporary: bool {
             if op == {
                 case .POSTFIX_DEREFERENCE; #through;
                 case .POINTER_DEREFERENCE; {
-                    temp := push_temporary();
-                    set_member_location(temp, slot_hl_indirect());
                     ok, name := rvalue(unary.subexpression);
                     if !ok then return false, "", false;
-                    move_member(name, slot(.HL));
+                    move_member(name, .HL);
+
+                    temp := push_temporary();
+                    slot := alloc_register();
+                    slots[slot].member = temp;
+                    slots[slot].part = .FULL;
+                    load_instruction(to_register(slot), .HL_INDIRECT);
+
                     return true, temp, true;
                 }
                 case; {
@@ -395,6 +401,8 @@ rvalue :: (node: *Code_Node) -> bool, string, temporary: bool {
 compile_expression :: (target_member: string) {
     node := context.current_node;
     log_verbose("Expression %", node.kind);
+    cool_members();
+    warm(target_member);
     if node.kind == {
         case .LITERAL; {
             lit := node.(*Code_Literal);
@@ -432,7 +440,7 @@ compile_expression :: (target_member: string) {
                     return;
                 }
                 case .BOOLEAN;{
-                    if member_location(target_member).kind == .NONE {
+                    if get_member_type(target_member) == .NONE {
                         type_member(target_member, .U8);
                     }
                     reg := ensure_member_in_register(target_member);
@@ -468,9 +476,9 @@ compile_expression :: (target_member: string) {
             }
             arithmetic_instruction(instr, left, right);
             if !is_wide(target_member) {
-                set_member_location(target_member, slot(.A));
+                set_member_location(target_member, .A);
             } else {
-                set_member_location(target_member, slot(.HL));
+                set_member_location(target_member, .HL);
             }
         } 
         case .IDENT; {
@@ -491,13 +499,13 @@ compile_expression :: (target_member: string) {
                 return;
             }
             if call.num_return_values_received != 0 {
-                if member_location(target_member) != slot(.A) { 
-                    ensure_register_empty(.A);
+                if member_location(target_member) != .A { 
+                    force_empty(.A);
                 }
             }
             add_call(call.resolved_procedure_expression.(*Code_Procedure_Header));
             if call.num_return_values_received != 0 {
-                set_member_location(target_member, slot(.A));
+                set_member_location(target_member, .A);
             }
         }
         case .CAST; {
@@ -564,8 +572,8 @@ compile_condition :: () -> [..]int {
                 arithmetic_instruction(.CP, left, right); 
                 array_add(*jumps, begin_jump(jump_kind));
             } else { // One or both is wide
-                lo_l, hi_l := split_register(member_location(left));
-                lo_r, hi_r := split_register(member_location(right));
+                lo_l, hi_l := split_register(l);
+                lo_r, hi_r := split_register(r);
                 if op == {
                     case .IS_EQUAL; {
                         if hi_l == .NONE || hi_r == .NONE {
@@ -610,7 +618,6 @@ compile_condition :: () -> [..]int {
         case .LITERAL; {
             temp := push_temporary();
             defer pop_temporary(temp);
-            ensure_register_empty(.A);
             set_member_location(temp, .A);
 
             compile_expression(temp,, current_node = node);
@@ -643,11 +650,17 @@ Instruction_Kind :: enum u8 {
     JR_C_REL :: 0x38;
     LD_A_IMM :: 0x3E;
     HALT :: 0x76;
+    PUSH_BC :: 0xC5;
     RET :: 0xC9;
     CALL :: 0xCD;
-    DI :: 0xF3;
-    EI :: 0xFB;
+    PUSH_DE :: 0xD5;
     RETI :: 0xD9;
+    ADD_SP_S8 :: 0xE8;
+    PUSH_HL :: 0xE5;
+    DI :: 0xF3;
+    PUSH_AF :: 0xF5;
+    LD_HL_SP_PLUS_S8 :: 0xF8;
+    EI :: 0xFB;
     CP_D8 :: 0xFE;
 }
 
@@ -658,7 +671,7 @@ load_instruction :: (dst_register: Register, src_register: Register) {
         assert(!(src == .HL_INDIRECT && dst == .HL_INDIRECT), "This is HALT");
         assert(dst <= .A);
         if dst == src then return;
-        output_bytes(0x40 + (dst.(u8) * 8) + src.(u8));
+        load_instruction(dst, src);
     } else {
         lo_src, hi_src := split_register(src_register);
         lo_dst, hi_dst := split_register(dst_register);
@@ -670,6 +683,10 @@ load_instruction :: (dst_register: Register, src_register: Register) {
             load_instruction(hi_dst, hi_src);
         }
     }
+}
+
+load_instruction :: inline (dst: Operation_Target, src: Operation_Target) {
+    output_bytes(0x40 + (dst.(u8) * 8) + src.(u8));
 }
 
 load_imm8 :: (dst: Register, val: u8) {
@@ -706,35 +723,31 @@ Arithmetic_Instruction :: enum u8 {
 }
 
 arithmetic_instruction :: (kind: Arithmetic_Instruction, left: string, right: string) {
-    r_slot := member_location(right);
-    assert(r_slot.kind == .REGISTER);
-    l_slot := member_location(left);
-    assert(l_slot.kind == .REGISTER);
+    r_loc := member_location(right);
+    l_loc := member_location(left);
 
-    r_loc = r_slot.register;
-    l_loc = l_slot.register;
     assert(!(kind == .CP && (is_wide(r_loc) || is_wide(l_loc))), "When outputting compares, please do it with small registers");
     if !is_wide(r_loc) && !is_wide(l_loc) {
         if kind == .SUB || (r_loc != .A && l_loc != .A) {
-            move_member(left, slot(.A));
+            move_member(left, .A);
             l_loc = .A;
         }
         r_loc= member_location(right);
         arithmetic_instruction(kind, l_loc, r_loc);
     } else {
-        ensure_register_empty(.HL);
-        ensure_register_empty(.A);
+        force_empty(.HL);
+        force_empty(.A);
         lo_l, hi_l := split_register(member_location(left));
         lo_r, hi_r := split_register(member_location(right));
         load_instruction(.A, lo_l);
         arithmetic_instruction(kind, .A, lo_r);
-        load_instruction(.L, .A);
+        load_instruction(Register.L, Register.A);
         other: Register;
 
         if hi_r != .NONE {
             other = hi_r;
         } else {
-            ensure_register_empty(.B);
+            force_empty(.B);
             other = .B;
             load_imm8(other, 0);
         }
@@ -753,7 +766,7 @@ arithmetic_instruction :: (kind: Arithmetic_Instruction, left: string, right: st
             error(tprint("Unhandled wide arithmetic instruction: %", kind));
             return;
         }
-        load_instruction(.H, .A);
+        load_instruction(Register.H, Register.A);
     }
 }
 
@@ -874,5 +887,7 @@ log_verbose :: (format: string, args: ..Any) #expand {
 #load "procedure.jai";
 #load "member.jai";
 #load "instrinsic.jai";
+#load "register_alloc.jai";
 
+#import "../../modules/Enumerated_Array";
 #import "Hash_Table";

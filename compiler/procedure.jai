@@ -9,6 +9,8 @@ Compiled_Procedure :: struct {
     base_address : u16;
     bytes: [..]u8;
     members: Member_Table;
+    slots: Slot_Table;
+    stack_size := 0;
     nb_temporaries := 0;
     return_added : bool;
 

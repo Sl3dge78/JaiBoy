@@ -11,5 +11,4 @@ func :: () -> u8 {
     } else {
         return 0;
     }
-
 }
