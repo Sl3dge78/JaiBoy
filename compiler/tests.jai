@@ -113,7 +113,7 @@ check_address :: (gb: *Gameboy, address: u16, val: u8, builder: *String_Builder)
     address_val := gb.mem[address];
     ok := address_val == val;
     if !ok {
-        print_to_builder(builder, "> Memory % is %. Expected %.\n", address, address_val, val);
+        print_to_builder(builder, "> Memory 0x% is %. Expected %.\n", formatInt(address, base = 16), address_val, val);
     } 
     return ok;
 
@@ -144,7 +144,7 @@ test_programs :: () {
     test_program("tests/call_005.jai", gb,cpu(.A, 133));
     test_program("tests/if_005.jai", gb,cpu(.A, 1));
     test_program("tests/if_006.jai", gb,cpu(.A, 0));
-    test_program("tests/memory_write_001.jai", gb,cpu(.A, 0));
+    test_program("tests/memory_write_001.jai", gb, ram(0xC000, 0x69));
     test_program("tests/while_001.jai", gb,cpu(.B, 10));
     test_program("tests/if_wide_001.jai", gb,cpu(.A, 69));
     test_program("tests/if_wide_002.jai", gb,cpu(.A, 69));

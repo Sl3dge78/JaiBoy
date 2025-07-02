@@ -1,8 +1,14 @@
 #run build_and_output_rom();
 
 build_and_output_rom :: () {
+    #if 0 {
     cart := build_cart("test_bed.jai",, log_level = .VERBOSE);
-    // cart := build_cart("tests/less_or_equal_002.jai",, log_level = .VERBOSE);
+    } else {
+        file := "tests/less_or_equal_001.jai";
+        f := read_entire_file(file);
+        log("%", f);
+        cart := build_cart(file,, log_level = .VERBOSE);
+    }
 
     filename := "output_rom.gb";
     write_entire_file(filename, cart.contents.data, cart.contents.count);

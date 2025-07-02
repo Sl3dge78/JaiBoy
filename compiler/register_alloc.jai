@@ -5,8 +5,7 @@ Register_Size :: enum {
 }
 
 Occupant :: struct {
-    empty: bool;
-    member: string;
+    member: string; // Empty string if empty
     part: enum {
         FULL;
         LOW;
@@ -15,12 +14,11 @@ Occupant :: struct {
 }
 
 operator == :: (a: Occupant, b: Occupant) -> bool {
-    if a.empty && b.empty then return true;
-    if a.empty != b.empty then return false;
     return a.member == b.member;
 }
 
-Slot :: enum u8 {
+Slot :: enum s16 {
+    NOT_ASSIGNED :: -1;
     A :: 0;
     B :: 1;
     C :: 2;
@@ -83,17 +81,18 @@ is_register :: inline (s: Slot) -> bool {
     return !is_stack(s);
 }
 
-
 has_free_register :: () -> bool {
+    using context.current_procedure;
     for 0..(Slot.STACK_00 - 1) {
-        if slots[it].empty then return true;
+        if is_empty(slots[it]) then return true;
     }
     return false;
 }
 
 has_free_wide :: () -> bool {
+    using context.current_procedure;
     for Slot.B..(Slot.STACK_00 - 1) {
-        if slots[it].empty && slot[it + 1].empty then return true;
+        if is_empty(slots[it]) && is_empty(slots[it + 1]) then return true;
     }
     return false;
 }
@@ -104,8 +103,7 @@ alloc_register :: () -> Slot {
         spill_coldest();
     }
     for 0..(Slot.STACK_00 - 1) {
-        if slots[it].empty {
-            slots[it].empty = false;
+        if is_empty(slots[it]) {
             return it;
         }
     }
@@ -120,17 +118,11 @@ alloc_wide_register :: () -> Slot, Slot {
         spill_coldest_wide();
     }
 
-    if slots[Slot.B].empty && slots[Slot.C].empty {
-        slots[Slot.B].empty = false;
-        slots[Slot.C].empty = false;
+    if is_empty(slots[Slot.B]) && is_empty(slots[Slot.C]){
         return .B, .C;
-    } else if slots[Slot.D].empty && slots[Slot.E].empty {
-        slots[Slot.D].empty = false;
-        slots[Slot.E].empty = false;
+    } else if is_empty(slots[Slot.D]) && is_empty(slots[Slot.E]) {
         return .D, .E;
-    } else if slots[Slot.H].empty && slots[Slot.L].empty {
-        slots[Slot.H].empty = false;
-        slots[Slot.L].empty = false;
+    } else if is_empty(slots[Slot.H]) && is_empty(slots[Slot.L]) {
         return .H, .L;
     } 
     assert(false);
@@ -140,8 +132,7 @@ alloc_wide_register :: () -> Slot, Slot {
 alloc_stack :: () -> Slot {
     using context.current_procedure;
     for Slot.STACK_00.(s32)..255 {
-        if slots[it].empty {
-            slots[it].empty = false;
+        if is_empty(slots[it]) {
             return xx it;
         }
     }
@@ -153,7 +144,7 @@ alloc_stack :: () -> Slot {
 alloc_any :: () -> Slot {
     using context.current_procedure;
     for slots {
-        if it.empty then return xx it_index;
+        if is_empty(it) then return xx it_index;
     }
     assert(false);
     return .STACK_MAX;
@@ -163,7 +154,7 @@ alloc_any_wide :: () -> hi: Slot, lo: Slot {
     using context.current_procedure;
     for slots {
         if xx it_index == Slot.A then continue;
-        if it.empty && slots[it_index + 1].empty {
+        if is_empty(it) && is_empty(slots[it_index + 1]) {
             return xx it_index, xx (it_index + 1);
         }
     }
@@ -174,19 +165,33 @@ alloc_any_wide :: () -> hi: Slot, lo: Slot {
 free_member :: (member: string) {
     using context.current_procedure;
     for *slots {
-        if !it.empty && it.member == member {
-            it.empty = true;
+        if it.member == member {
             it.member = "";
         }
     }
 }
 
+is_empty :: (register: Register) -> bool {
+    if is_wide(register) {
+        hi, lo := to_slot_wide(register);
+        return is_empty(hi) && is_empty(lo);
+    } else {
+        r := to_slot(register);
+        return is_empty(r);
+    }
+}
+
 is_empty :: (slot: Slot) -> bool {
     using context.current_procedure;
-    return slots[slot].empty;
+    return slots[slot].member == "";
+}
+
+is_empty :: (occupant: Occupant) -> bool {
+    return occupant.member == "";
 }
 
 force_empty :: (register: Register) {
+    log_verbose("Force empty %", register);
     if is_wide(register) {
         lo_src, hi_src := split_register(register);
         lo_s := to_slot(lo_src);
@@ -221,24 +226,31 @@ move :: (from: Slot, to: Slot) {
         assert(false, "Trying to move from stack to stack");
     }
     slots[to] = slots[from];
-    slots[from].empty = true;
+    slots[from].member = "";
 }
 
 move_wide :: (from_hi: Slot, from_lo : Slot, to_hi: Slot, to_lo: Slot) {
+    using context.current_procedure;
     // @TODO Check if from == register and to == stack to use PUSH
-    move(from_hi, to_hi);
-    move(from_lo, to_lo);
+    if from_hi == .H && from_lo == .L && to_hi >= .STACK_00 && to_lo >= .STACK_00 {
+        assert(to_hi + 1 == to_lo);
+        push_hl();
+    } else {
+        move(from_hi, to_hi);
+        move(from_lo, to_lo);
+    }
 }
 
 from_top_of_stack :: (slot: Slot) -> s8 {
+    assert(slot != .STACK_MAX);
+    assert(slot >= .STACK_00);
     return slot.(s8) - Slot.STACK_00.(s8);
 }
 
 // Base address in HL
 push_stack :: () {
     using context.current_procedure;
-
-    force_empty(.HL);
+    push_hl_if_not_empty();
     output_bytes(.LD_HL_SP_PLUS_S8, 0);
     output_bytes(.ADD_SP_S8, cast,no_check(u8)(1));
     stack_size += 1;
@@ -251,24 +263,40 @@ pop_stack :: (size: s8) {
     stack_size -= size;
 }
 
-stack_in_hl :: (slot: Slot) {
-    assert(slot >= .STACK_00);
-    stack_addr := stack_size - from_top_of_stack(from);
-    force_empty(.HL);
-    output_bytes(.LD_HL_SP_PLUS_S8, stack_addr);
+push_hl_if_not_empty :: () {
+    using context.current_procedure;
+    if !is_empty(.HL) {
+        log_verbose("Pushing HL to free space");
+        output_bytes(.PUSH_HL);
+        stack_size += 1;
+        slots[xx(Slot.STACK_00) + stack_size] = slots[Slot.H];
+        stack_size += 1;
+        slots[xx(Slot.STACK_00) + stack_size] = slots[Slot.L];
+        slots[Slot.H] = Occupant.{};
+        slots[Slot.L] = Occupant.{};
+    }
 }
 
-find_single :: (member: string) -> Slot {
+stack_in_hl :: (slot: Slot) {
+    using context.current_procedure;
+    assert(slot >= .STACK_00);
+    stack_addr := stack_size - from_top_of_stack(slot);
+    force_empty(.HL);
+    output_bytes(.LD_HL_SP_PLUS_S8, cast,no_check(u8)(stack_addr));
+}
+
+find_single :: (member: string) -> bool, Slot {
     using context.current_procedure;
     for slots {
-        assert(it.part == .FULL);
-        if it.member == member return xx it_index;
+        if it.member == member {
+            assert(it.part == .FULL);
+            return true, xx it_index;
+        }
     }
-    assert(false);
-    return .STACK_MAX;
+    return false, .STACK_MAX;
 }
 
-find_wide :: (member: string) -> hi: Slot, lo: Slot {
+find_wide :: (member: string) -> bool, hi: Slot, lo: Slot {
     using context.current_procedure;
     found := 0;
     lo: Slot;
@@ -285,12 +313,11 @@ find_wide :: (member: string) -> hi: Slot, lo: Slot {
                 found |= 0b10;
             }
             if found == 0b11 {
-                return hi, lo;
+                return true, hi, lo;
             }
         }
     }
-    assert(false);
-    return .STACK_MAX, .STACK_MAX;
+    return false, .STACK_MAX, .STACK_MAX;
 }
 
 split_wide_slot :: (register: Register) -> hi: Slot, lo: Slot {
@@ -298,17 +325,19 @@ split_wide_slot :: (register: Register) -> hi: Slot, lo: Slot {
     return to_slot(hi), to_slot(lo);
 }
 
-
 spill_coldest :: () {
     using context.current_procedure;
-    name := coldest_member_in_register();
+    found, name := coldest_member_in_register();
+    if !found then return;
     coldest := get_member(name);
-    if !is_wide(coldest) {
-        from := find_single(name);
+
+    if !is_wide(name) {
+        ok, from := find_single(name);
+        assert(ok);
         to := alloc_stack();
         move(from, to);
     } else {
-        lo_src, hi_src := find_wide(name);
+        ok, lo_src, hi_src := find_wide(name);
         hi_dst := alloc_stack();
         lo_dst := alloc_stack();
         if hi_src == .B && lo_src == .C {
@@ -323,26 +352,25 @@ spill_coldest :: () {
         }
         slots[hi_dst] = slots[hi_src];
         slots[lo_dst] = slots[lo_src];
-        slots[lo_src].empty = true;
-        slots[hi_src].empty = true;
+        slots[lo_src].member = "";
+        slots[hi_src].member = "";
     }
 }
 
-coldest_member_in_register :: () -> string {
+coldest_member_in_register :: () -> bool, string {
     using context.current_procedure;
     result := "";
     coldest := S64_MAX;
     for 0.. (Slot.STACK_00 - 1) {
         occ := slots[it];
-        if occ.empty then continue; 
+        if is_empty(occ) then continue; 
         member := get_member(occ.member);
         if member.hot > coldest {
             result = occ.member;
             coldest = member.hot;
         }
     }
-    assert(result != "");
-    return result;
+    return result != "", result;
 }
 
 coldest_wide_in_register :: () -> Slot, Slot {
@@ -351,11 +379,11 @@ coldest_wide_in_register :: () -> Slot, Slot {
     score :: (a: Slot, b: Slot) -> int {
         using context.current_procedure;
         result := 0;
-        if !slots[a].empty {
+        if !is_empty(slots[a]) {
             ma := slots[a].member;
             result += get_member(ma).hot;
         }
-        if !slots[b].empty {
+        if !is_empty(slots[b]) {
             mb := slots[b].member;
             result += get_member(mb).hot;
         }
@@ -393,8 +421,8 @@ spill_coldest_wide :: () {
     }
     slots[hi_dst] = slots[hi_src];
     slots[lo_dst] = slots[lo_src];
-    slots[lo_src].empty = true;
-    slots[hi_src].empty = true;
+    slots[lo_src].member = "";
+    slots[hi_src].member = "";
 }
 
 
@@ -417,18 +445,18 @@ compare_slots :: (other: Slot_Table) -> bool {
 
 reconcile_slots :: (original: Slot_Table) {
     using context.current_procedure;
-    max_iters := 100;
+    max_iters := 20;
     while !compare_slots(original) {
         for slots {
             if it != original[it_index] {
                 initial := find_equivalent_occupant_in(original, it);
-                log_verbose("Reconciling % (% to %)", it_index, it_index.(Slot), initial.(Slot));
+                log_verbose("Reconciling % (% to %)", it.member, it_index.(Slot), initial.(Slot));
                 force_empty(to_register(initial));
                 move(xx it_index, initial);
             }
         }
         max_iters -= 1;
-        assert(max_iters > 0 , "Couldn't completely reconcile_members after 100 iterations");
+        assert(max_iters > 0 , "Couldn't completely reconcile_members after % iterations", 20);
     }
 }
 
@@ -442,51 +470,28 @@ find_equivalent_occupant_in :: (table: Slot_Table, occ: Occupant) -> Slot {
     return .STACK_MAX;
 }
 
-// Member_Slot :: struct {
-//     kind : enum {
-//         NONE;
-//         REGISTER;
-//         STACK;
-//         HL_INDIRECT;
-//     };
-//     union {
-//         register: Register;
-//         rel_address: u8;
-//     };
-// }
-//
-// slot_none :: () -> Member_Slot {
-//     return .{ .NONE };
-// }
-//
-// slot_hl_indirect :: () -> Member_Slot {
-//     return .{ .HL_INDIRECT };
-// }
-//
-// slot :: (r: Register) -> Member_Slot {
-//     return .{ kind = .REGISTER, register = r };
-// }
-//
-// operator == :: (r: Member_Slot, l: Member_Slot) -> bool {
-//     if r.kind != l.kind then return false;
-//     if r.kind == {
-//         case .REGISTER; return r.register == l.register;
-//         case .STACK; return r.rel_address == l.rel_address;
-//         case; return true;
-//     }
-// }
-//
-// // Returns true if the slots collide
-// overlapping :: (r: Member_Slot, l: Member_Slot) -> bool {
-//     if r.kind != l.kind return false;
-//     if r.kind == {
-//         case .REGISTER; return (r.register & l.register) != 0;
-//         case .STACK; return r.rel_address == l.rel_address;
-//         case; return true;
-//     }
-// }
-//
-// get_next_slot :: () -> Member_Slot {
-//
-// }
-//
+push :: (hi: Slot, lo: Slot) {
+    using context.current_procedure;
+    stack_size += 1;
+    slots[Slot.STACK_00.(int) + stack_size] = slots[hi];
+    stack_size += 1;
+    slots[Slot.STACK_00.(int) + stack_size] = slots[lo];
+    slots[hi] = Occupant.{};
+    slots[lo] = Occupant.{};
+}
+
+push_bc :: () {
+    output_bytes(.PUSH_BC);
+    push(.B, .C);
+}
+
+push_de :: () {
+    output_bytes(.PUSH_DE);
+    push(.D, .E);
+}
+
+push_hl :: () {
+    output_bytes(.PUSH_HL);
+    push(.H, .L);
+}
+

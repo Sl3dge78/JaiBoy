@@ -34,7 +34,11 @@ push_member :: (name: string, ti: *Type_Info) {
         error("Shadowing isn't supported yet");
         return;
     }
-    table_add(*members, name, member(to_gb_type(ti)));
+    if ti == null { 
+        table_add(*members, name, member(.NONE));
+    } else { 
+        table_add(*members, name, member(to_gb_type(ti)));
+    }
 }
 
 push_temporary :: () -> string {
@@ -49,12 +53,22 @@ push_temporary :: () -> string {
 pop_member :: (name: string) {
     using context.current_procedure;
     ok := table_remove(*members, name); 
+    for *slots {
+        if it.member == name {
+            it.member = "";
+        }
+    }
     assert(ok, "Member % couldn't be found", name);
 }
 
 pop_temporary :: (name: string) {
     using context.current_procedure;
     ok := table_remove(*members, name); 
+    for *slots {
+        if it.member == name {
+            it.member = "";
+        }
+    }
     assert(ok, "Member % couldn't be found", name);
     log_verbose("Popping temporary %", name);
     nb_temporaries -= 1;
@@ -62,7 +76,7 @@ pop_temporary :: (name: string) {
 
 get_member :: (name: string) -> *Member {
     member := table_find_pointer(*context.current_procedure.members, name);
-    assert(member != null, "Couldn't find member %", name);
+    assert(member != null, "Couldn't find member '%'", name);
     return member;
 }
 
@@ -70,7 +84,10 @@ get_member :: (name: string) -> *Member {
 // Types
 
 to_gb_type :: (ti: *Type_Info) -> GB_Type {
-    if ti == null then return .NONE;
+    if ti == null {
+        assert(false, "You gave me a null type");
+        return .NONE;
+    }
     if ti.type == {
         case .INTEGER; {
             if ti.runtime_size == {
@@ -94,21 +111,38 @@ to_gb_type :: (ti: *Type_Info) -> GB_Type {
     }
 }
 
+type_declaration :: (decl: *Code_Declaration) -> *Type_Info {
+    if decl.type != null then return decl.type;
+    if decl.type_inst != null then return decl.type_inst.result;
+    if decl.expression != null then return decl.expression.type;
+    assert(false, "Cannot type this declaration");
+    return null;
+}
+
 to_size :: (t: GB_Type) -> Register_Size {
     if #complete t == {
         case .U8; return .BYTE;
         case .U16; #through;
         case .POINTER; return .SHORT;
-        case .NONE; assert(false); return .SHORT;
+        case .NONE; assert(false, "Cannot size a None type"); return .SHORT;
     }
 }
 
-is_wide :: (name: string) -> bool {
-    return to_size(get_member(name).type) == .SHORT;
+is_wide :: (t: GB_Type) -> bool {
+    return to_size(t) == .SHORT;
 }
 
-is_wide :: (member: Member) -> bool {
-    return to_size(member.type) == .SHORT;
+is_wide :: (name: string) -> bool {
+    member := get_member(name);
+    assert(member.type != .NONE);
+    result : bool;
+    if to_size(member.type) == {
+        case .BYTE; result = false;
+        case .SHORT; result = true;
+    }
+    // loc := member_location(name);
+    // assert(loc == .NONE || is_wide(loc) == result, "This member - % - should not be here (it is % but is in %)! Did you change its type without moving it?", name, to_size(member.type), loc);
+    return result;
 }
 
 can_we_handle_type :: (ti: *Type_Info) -> bool {
@@ -137,13 +171,24 @@ get_member_type :: (name: string) -> GB_Type {
     return get_member(name).type;
 }
 
+auto_deduce_type :: (a: GB_Type, b: GB_Type) -> GB_Type {
+    if a == .U8 && b == .U16 then return .U16;
+    if b == .U8 && a == .U16 then return .U16;
+    assert(false, "Auto deduction not implemented: % - %", a, b);
+    return .NONE;
+}
+
 type_member :: (name: string, type: GB_Type) {
     assert(type != .NONE, "Giving a % type to type a member", type);
     member := get_member(name);
+    loc := member_location(name);
 
     if member.type != .NONE {
         assert(member.type == type, "Member is already typed differently: % (trying %)", member.type, type);
     } else {
+        if loc != .NONE {
+            assert(is_wide(loc) == is_wide(type), "Typing a member that is placed in a different sized register (type: %, register:%)", type, loc);
+        }
         member.type = type;
     }
 }
@@ -163,19 +208,21 @@ cast_member :: (name: string, type: GB_Type) {
 
 set_member_location :: (name: string, register: Register) {
     using context.current_procedure;
+    for *slots {
+        if it.member == name {
+            it.member = "";
+        }
+    }
     force_empty(register);
     if is_wide(register) {
         hi, lo := to_slot_wide(register);
-        slots[hi].empty = false;
         slots[hi].member = name;
         slots[hi].part = .HIGH;
-        slots[lo].empty = false;
         slots[lo].member = name;
         slots[lo].part = .LOW;
 
     } else {
         slot := to_slot(register);
-        slots[slot].empty = false;
         slots[slot].member = name;
         slots[slot].part = .FULL;
     }
@@ -187,64 +234,52 @@ member_location :: (name: string) -> Register {
     full : Register;
     filled := 0;
     for slots {
-        if it.empty then continue;
+        if is_empty(it) then continue;
         if it.member == name {
-            assert(it_index >= xx Slot.STACK_00, "Trying to operate on a member that is on the stack");
+            assert(it_index != xx Slot.STACK_MAX, "Trying to operate on a member that is in an unexpected slot");
+            assert(it_index <  xx Slot.STACK_00,  "Trying to operate on a member that is on the stack: %", it_index.(Slot));
             full |= to_register(xx it_index);
             if it.part == {
-                case .FULL; filled |= 0b11;
-                case .LOW; filled |= 0b01;
-                case .HIGH; filled |= 0b11;
+                case .FULL; filled |= 0b11; 
+                case .LOW;  filled |= 0b01;
+                case .HIGH; filled |= 0b10;
             }
             if filled == 0b11 then return full;
         }
     }
-    assert(false);
     return .NONE;
 }
 
-// ensure_slot_empty :: (s: Member_Slot) {
-//     using context.current_procedure;
-//     assert(s.kind != .NONE);
-//     for *members {
-//         if overlapping(it.slot, s) {
-//             move_member_to_next_available_slot(it_index);
-//         }
-//     }
-// }
-//
-// ensure_register_empty :: (r: Register) {
-//     using context.current_procedure;
-//     assert(r != .NONE);
-//     for *members {
-//         if it.slot.kind != .REGISTER then continue;
-//         if it.slot.register & r == 0 then continue;
-//         new : Register;
-//         if !is_wide(it) {
-//             ok:, new = find_next_available_register(.BYTE);
-//         } else {
-//             ok:, new = find_next_available_wide(.SHORT);
-//         }
-//         log_verbose("Making sure % is empty by moving %", r, it_index);
-//         load_instruction(new, r);
-//         it.slot = new;
-//         if !is_wide(r) then return;
-//     }
-// }
+ensure_wide_members_in_bc_de :: (a: string, b: string) {
+    using context.current_procedure;
+    log_verbose("Ensure % and % in BC DE", a, b);
+    if !is_empty(.BC) {
+        push_bc();
+    }
+    if !is_empty(.DE) {
+        push_de();
+    }
+    log_verbose("Move % to BC", a);
+    move_member(a, .BC);
+    log_verbose("Move % to DE", b);
+    move_member(b, .DE);
+}
 
 move_member :: (name: string, new: Register) {
     using context.current_procedure;
     if !is_wide(name) {
         assert(!is_wide(new));
-        src := find_single(name);
+        ok, src := find_single(name);
+        assert(ok);
         dst := to_slot(new);
         if src == dst then return; // Nothing to do
         force_empty(new);
         move(src, dst);
     } else {
-        assert(is_wide(new));
+        assert(is_wide(new), "Moving from a wide to small register");
         lo_n, hi_n := split_wide_slot(new);
-        hi_m, lo_m := find_wide(name);
+        ok, hi_m, lo_m := find_wide(name);
+        assert(ok);
         if lo_n == lo_m && hi_n == hi_m then return; // Nothing to do;
         force_empty(new);
         move_wide(hi_m, lo_m, hi_n, lo_n);
@@ -252,10 +287,19 @@ move_member :: (name: string, new: Register) {
 }
 
 ensure_member_in_register :: (name: string) -> Register {
+    using context.current_procedure;
     member := get_member(name);
     size := to_size(member.type);
-    if !is_wide(member) {
-        from := find_single(name);
+    if !is_wide(name) {
+        found, from := find_single(name);
+        if !found { // Member not placed yet
+            spill_coldest();
+            to := alloc_register(); // Guaranteed to succeed
+            slots[to].member = name;
+            slots[to].part = .FULL;
+            return to_register(to);
+        }
+
         if is_register(from) {
             return to_register(from);
         } else {
@@ -265,47 +309,26 @@ ensure_member_in_register :: (name: string) -> Register {
             return to_register(to);
         }
     } else {
-        hi, lo := find_wide(name);
-        if is_register(hi) && is_register(lo) {
+        ok, hi, lo := find_wide(name);
+        if !ok {
+            hi, lo := alloc_wide_register();
+            slots[hi].member = name;
+            slots[lo].member = name;
+            slots[hi].part = .HIGH;
+            slots[lo].part = .LOW;
             return to_register(hi, lo);
         } else {
-            spill_coldest_wide();
-            to_hi, to_lo := alloc_wide_register(); // Guaranteed to succeed
-            move_wide(hi, lo, to_hi, to_lo);
-            return to_register(to_hi, to_lo);
+            if is_register(hi) && is_register(lo) {
+                return to_register(hi, lo);
+            } else {
+                spill_coldest_wide();
+                to_hi, to_lo := alloc_wide_register(); // Guaranteed to succeed
+                move_wide(hi, lo, to_hi, to_lo);
+                return to_register(to_hi, to_lo);
+            }
         }
     }
 }
-//
-// move_member_to_next_available_slot :: (name: string) {
-//     using context.current_procedure;
-//     member := get_member(name);
-//     new_slot : Member_Slot;
-//     if member.type == {
-//         case .NONE; assert(false, "I don't know how to place a non typed member");
-//         case .U8; {
-//             ok:, new_slot = find_next_available(.BYTE);
-//             assert(ok, "Too many members");
-//         } 
-//         case .POINTER; #through;
-//         case .U16; {
-//             ok:, new_slot = find_next_available(.SHORT);
-//             assert(ok, "Too many members");
-//         }
-//         case; assert(false, "Todo (type %)", member.type);
-//     }
-//     move_member(name, slot);
-// }
-
-// get_member_at :: (r: Register) -> bool, string {
-//     using context.current_procedure;
-//     for members {
-//         if it.slot.kind != .REGISTER then continue;
-//         if it.slot.register == r then return true, it_index;
-//     }
-//     s : string = ---;
-//     return true, s;
-// }
 
 print_members :: () {
     builder: String_Builder;

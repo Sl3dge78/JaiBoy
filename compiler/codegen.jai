@@ -196,7 +196,8 @@ compile_block :: () {
     block := context.current_node.(*Code_Block);
     for block.members {
         assert(it.kind == .DECLARATION);
-        push_member(it.name, null);
+        t := type_declaration(it.(*Code_Declaration));
+        push_member(it.name, t);
     }
 
     if block.block_type != .IMPERATIVE {
@@ -221,10 +222,11 @@ compile_statement :: () {
     if node.kind == {
         case .DECLARATION; {
             decl := cast(*Code_Declaration)node;
-            t := to_gb_type(decl.type);
+            type := type_declaration(decl);
+            t := to_gb_type(type);
             if t != .NONE {
                 type_member(decl.name, t);
-            }
+            } 
             if decl.expression != null {
                 compile_expression(decl.name,, current_node = decl.expression);
             }
@@ -241,6 +243,7 @@ compile_statement :: () {
             jumps := compile_condition(,, current_node = code.condition);
             initial_members := copy_slots(,, temp);
 
+            log_verbose("Compiling then block...");
             compile_block(,, current_node = code.then_block);
             then_members := copy_slots(,, temp);
 
@@ -250,6 +253,7 @@ compile_statement :: () {
                 for jumps {
                     end_jump(it);
                 }
+                log_verbose("Compiling else block...");
                 compile_block(,, current_node = code.else_block);
                 reconcile_slots(then_members);
                 end_jump(skip_else);
@@ -264,10 +268,11 @@ compile_statement :: () {
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
             op : Operator_Type = xx bin_op.operator_type;
-            ok, left, temp := rvalue(bin_op.left);
+            ok, left, pointer := rvalue(bin_op.left);
             if !ok then return;
             defer {
-                if temp {
+                if pointer {
+                    load_instruction(.HL_INDIRECT, to_opcode(member_location(left)));
                     pop_temporary(left);
                 }
             }
@@ -362,11 +367,12 @@ compile_statement :: () {
     }
 }
 
-rvalue :: (node: *Code_Node) -> bool, string, temporary: bool {
+rvalue :: (node: *Code_Node) -> ok: bool, member: string, pointer: bool {
+    using context.current_procedure;
     if node.kind == {
         case .IDENT; {
             ident := node.(*Code_Ident);
-            return true, ident.name, false;
+            return true, ident.name, pointer = false;
         }
         case .UNARY_OPERATOR; {
             unary := node.(*Code_Unary_Operator);
@@ -375,26 +381,26 @@ rvalue :: (node: *Code_Node) -> bool, string, temporary: bool {
                 case .POSTFIX_DEREFERENCE; #through;
                 case .POINTER_DEREFERENCE; {
                     ok, name := rvalue(unary.subexpression);
-                    if !ok then return false, "", false;
+                    if !ok then return false, "", pointer = false;
                     move_member(name, .HL);
 
                     temp := push_temporary();
                     slot := alloc_register();
                     slots[slot].member = temp;
                     slots[slot].part = .FULL;
-                    load_instruction(to_register(slot), .HL_INDIRECT);
+                    load_instruction(to_opcode(to_register(slot)), .HL_INDIRECT);
 
-                    return true, temp, true;
+                    return true, temp, pointer = true;
                 }
                 case; {
                     error(tprint("Unsupported unary operator rvalue: %", operator_to_string2(xx unary.operator_type)));
-                    return false, "", false;
+                    return false, "", pointer = false;
                 }
             }
         }
         case; 
             error(tprint("Unsupported rvalue: %", node.kind));
-            return false, "", false;
+            return false, "", pointer = false;
     }
 }
 
@@ -475,6 +481,15 @@ compile_expression :: (target_member: string) {
                 }
             }
             arithmetic_instruction(instr, left, right);
+            if get_member_type(target_member) == .NONE {
+                lt := get_member_type(left);
+                rt := get_member_type(right);
+                if lt == rt {
+                    type_member(target_member, lt);
+                } else {
+                    type_member(target_member, auto_deduce_type(lt, rt));
+                }
+            }
             if !is_wide(target_member) {
                 set_member_location(target_member, .A);
             } else {
@@ -732,18 +747,24 @@ arithmetic_instruction :: (kind: Arithmetic_Instruction, left: string, right: st
             move_member(left, .A);
             l_loc = .A;
         }
-        r_loc= member_location(right);
+        r_loc = member_location(right);
         arithmetic_instruction(kind, l_loc, r_loc);
     } else {
+        log_verbose("Wide arithmetic % > %", member_location(left), member_location(right));
         force_empty(.HL);
         force_empty(.A);
+        if is_wide(left) && is_wide(right) {
+            ensure_wide_members_in_bc_de(left, right);
+        }
         lo_l, hi_l := split_register(member_location(left));
         lo_r, hi_r := split_register(member_location(right));
+        log_verbose("Arith low part");
         load_instruction(.A, lo_l);
         arithmetic_instruction(kind, .A, lo_r);
         load_instruction(Register.L, Register.A);
         other: Register;
 
+        log_verbose("Arith hi part");
         if hi_r != .NONE {
             other = hi_r;
         } else {
@@ -889,5 +910,5 @@ log_verbose :: (format: string, args: ..Any) #expand {
 #load "instrinsic.jai";
 #load "register_alloc.jai";
 
-#import "../../modules/Enumerated_Array";
 #import "Hash_Table";
+#import "Math";
