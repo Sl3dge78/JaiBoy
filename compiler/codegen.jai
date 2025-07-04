@@ -851,7 +851,7 @@ is_wide :: (r: Register) -> bool {
 }
 
 split_register :: (r: Register) -> hi: Register, lo: Register {
-    if !is_wide(r) return r, .NONE;
+    if !is_wide(r) return .NONE, r;
     return get_hi(r), get_lo(r);
 }
 
@@ -864,7 +864,7 @@ to_opcode :: (r: Register) -> Operation_Target {
     if r & .E return .E;
     if r & .H return .H;
     if r & .L return .L;
-    assert(false, "r: %", r);
+    assert(false, "Trying to opcode the % register", r);
     return 0;
 }
 

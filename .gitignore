@@ -2,4 +2,5 @@
 .vscode
 bin
 bin/*
+!bin/font.png
 tmp
