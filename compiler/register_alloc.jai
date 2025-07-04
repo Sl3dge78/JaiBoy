@@ -66,7 +66,7 @@ to_slot :: (r: Register) -> Slot {
 
 to_slot_wide :: (r: Register) -> hi: Slot, lo: Slot {
     assert(is_wide(r));
-    lor, hir := split_register(r);
+    hir, lor := split_register(r);
     assert(hir != .NONE);
     hi := to_slot(hir);
     lo := to_slot(lor);
@@ -192,13 +192,15 @@ is_empty :: (occupant: Occupant) -> bool {
 
 force_empty :: (register: Register) {
     log_verbose("Force empty %", register);
+    defer log_verbose("Empty!");
     if is_wide(register) {
-        lo_src, hi_src := split_register(register);
+        hi_src, lo_src := split_register(register);
         lo_s := to_slot(lo_src);
         hi_s := to_slot(hi_src);
         if is_empty(lo_s) && is_empty(hi_s) then return;
 
         hi_dst, lo_dst := alloc_any_wide();
+        log_verbose("Move wide: % % -> % %", hi_s, lo_s, hi_dst, lo_dst);
         move_wide(hi_s, lo_s, hi_dst, lo_dst);
     } else {
         if is_empty(to_slot(register)) then return;
@@ -208,6 +210,13 @@ force_empty :: (register: Register) {
 }
 
 move :: (from: Slot, to: Slot) {
+    using context.current_procedure;
+    copy(from, to);
+    slots[to] = slots[from];
+    slots[from].member = "";
+}
+
+copy :: (from: Slot, to: Slot) {
     using context.current_procedure;
     if is_register(from) && is_register(to) {
         load_instruction(to_register(to), to_register(from));
@@ -225,8 +234,6 @@ move :: (from: Slot, to: Slot) {
         // Kinda dumb
         assert(false, "Trying to move from stack to stack");
     }
-    slots[to] = slots[from];
-    slots[from].member = "";
 }
 
 move_wide :: (from_hi: Slot, from_lo : Slot, to_hi: Slot, to_lo: Slot) {
@@ -239,6 +246,11 @@ move_wide :: (from_hi: Slot, from_lo : Slot, to_hi: Slot, to_lo: Slot) {
         move(from_hi, to_hi);
         move(from_lo, to_lo);
     }
+}
+
+copy_wide :: (from_hi: Slot, from_lo : Slot, to_hi: Slot, to_lo: Slot) {
+    copy(from_hi, to_hi);
+    copy(from_lo, to_lo);
 }
 
 from_top_of_stack :: (slot: Slot) -> s8 {
@@ -321,7 +333,7 @@ find_wide :: (member: string) -> bool, hi: Slot, lo: Slot {
 }
 
 split_wide_slot :: (register: Register) -> hi: Slot, lo: Slot {
-    lo, hi:= split_register(register);
+    hi, lo:= split_register(register);
     return to_slot(hi), to_slot(lo);
 }
 
@@ -394,9 +406,10 @@ coldest_wide_in_register :: () -> Slot, Slot {
     de := score(.D, .E);
     hl := score(.H, .L);
     
-    if bc < de && bc < hl {
+    log_verbose("hotness: bc: % de: % hl: %", bc, de, hl);
+    if bc <= de && bc <= hl {
         return .B, .C;
-    } else if de < bc && de < hl {
+    } else if de <= bc && de <= hl {
         return .D, .E;
     } else {
         return .H, .L;

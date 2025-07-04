@@ -500,8 +500,7 @@ compile_expression :: (target_member: string) {
             ident := node.(*Code_Ident);
             type_member(target_member, get_member_type(ident.name));
             l := ensure_member_in_register(target_member);
-            r := ensure_member_in_register(ident.name);
-            load_instruction(l, r);
+            copy_member_to(ident.name, l);
         }
         case .PROCEDURE_CALL; {
             call := node.(*Code_Procedure_Call);
@@ -587,8 +586,8 @@ compile_condition :: () -> [..]int {
                 arithmetic_instruction(.CP, left, right); 
                 array_add(*jumps, begin_jump(jump_kind));
             } else { // One or both is wide
-                lo_l, hi_l := split_register(l);
-                lo_r, hi_r := split_register(r);
+                hi_l, lo_l := split_register(l);
+                hi_r, lo_r := split_register(r);
                 if op == {
                     case .IS_EQUAL; {
                         if hi_l == .NONE || hi_r == .NONE {
@@ -688,8 +687,8 @@ load_instruction :: (dst_register: Register, src_register: Register) {
         if dst == src then return;
         load_instruction(dst, src);
     } else {
-        lo_src, hi_src := split_register(src_register);
-        lo_dst, hi_dst := split_register(dst_register);
+        hi_src, lo_src:= split_register(src_register);
+        hi_dst, lo_dst:= split_register(dst_register);
         assert(lo_src != .NONE && lo_dst != .NONE, "One of the registers is None. src: % dst: %", lo_src, lo_dst);
         assert(hi_dst != .NONE, "Copying a wide register to a small one!");
         log_verbose("Copying from % to %", src_register, dst_register);
@@ -718,7 +717,7 @@ load_imm16 :: (dst: Register, val: u16) {
     instr : u8;
     if dst == {
         case .BC; instr = 0x01;
-        case .DE; instr = 0x01;
+        case .DE; instr = 0x11;
         case .HL; instr = 0x21;
         case; assert(false, "I don't know how to handle this: %", dst);
     }
@@ -756,8 +755,8 @@ arithmetic_instruction :: (kind: Arithmetic_Instruction, left: string, right: st
         if is_wide(left) && is_wide(right) {
             ensure_wide_members_in_bc_de(left, right);
         }
-        lo_l, hi_l := split_register(member_location(left));
-        lo_r, hi_r := split_register(member_location(right));
+        hi_l, lo_l := split_register(member_location(left));
+        hi_r, lo_r := split_register(member_location(right));
         log_verbose("Arith low part");
         load_instruction(.A, lo_l);
         arithmetic_instruction(kind, .A, lo_r);
@@ -851,9 +850,9 @@ is_wide :: (r: Register) -> bool {
     return r == .BC || r == .DE || r == .HL;
 }
 
-split_register :: (r: Register) -> lo: Register, hi: Register {
+split_register :: (r: Register) -> hi: Register, lo: Register {
     if !is_wide(r) return r, .NONE;
-    return get_lo(r), get_hi(r);
+    return get_hi(r), get_lo(r);
 }
 
 to_opcode :: (r: Register) -> Operation_Target {

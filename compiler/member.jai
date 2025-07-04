@@ -44,7 +44,9 @@ push_member :: (name: string, ti: *Type_Info) {
 push_temporary :: () -> string {
     using context.current_procedure;
     name := tprint("temp_%", formatInt(nb_temporaries, minimum_digits = 2));
-    table_add(*members, name, member(.NONE));
+    mem := member(.NONE);
+    mem.hot = 999;
+    table_add(*members, name, mem);
     nb_temporaries += 1;
     log_verbose("Adding temporary %", name);
     return name;
@@ -266,6 +268,7 @@ ensure_wide_members_in_bc_de :: (a: string, b: string) {
 }
 
 move_member :: (name: string, new: Register) {
+    log_verbose("Moving % to %", name, new);
     using context.current_procedure;
     if !is_wide(name) {
         assert(!is_wide(new));
@@ -277,17 +280,47 @@ move_member :: (name: string, new: Register) {
         move(src, dst);
     } else {
         assert(is_wide(new), "Moving from a wide to small register");
-        lo_n, hi_n := split_wide_slot(new);
+        hi_n, lo_n := split_wide_slot(new);
         ok, hi_m, lo_m := find_wide(name);
-        assert(ok);
+        if !ok {
+            force_empty(new);
+            set_member_location(name, new);
+            return;
+        }
+        assert(ok, "% not found", name);
         if lo_n == lo_m && hi_n == hi_m then return; // Nothing to do;
         force_empty(new);
         move_wide(hi_m, lo_m, hi_n, lo_n);
     }
 }
 
+copy_member_to :: (name: string, new: Register) {
+    log_verbose("Copying % to %", name, new);
+    using context.current_procedure;
+    if !is_wide(name) {
+        assert(!is_wide(new));
+        ok, src := find_single(name);
+        assert(ok);
+        dst := to_slot(new);
+        if src == dst then return; // Nothing to do
+        copy(src, dst);
+    } else {
+        assert(is_wide(new), "Moving from a wide to small register");
+        hi_n, lo_n := split_wide_slot(new);
+        ok, hi_m, lo_m := find_wide(name);
+        if !ok {
+            set_member_location(name, new);
+            return;
+        }
+        assert(ok, "% not found", name);
+        if lo_n == lo_m && hi_n == hi_m then return; // Nothing to do;
+        copy_wide(hi_m, lo_m, hi_n, lo_n);
+    }
+}
+
 ensure_member_in_register :: (name: string) -> Register {
     using context.current_procedure;
+    log_verbose("Ensuring % is in register", name);
     member := get_member(name);
     size := to_size(member.type);
     if !is_wide(name) {
@@ -312,6 +345,7 @@ ensure_member_in_register :: (name: string) -> Register {
         ok, hi, lo := find_wide(name);
         if !ok {
             hi, lo := alloc_wide_register();
+            log_verbose("Allocating wide: % %", hi, lo);
             slots[hi].member = name;
             slots[lo].member = name;
             slots[hi].part = .HIGH;
