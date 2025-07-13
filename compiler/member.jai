@@ -41,9 +41,10 @@ push_member :: (name: string, ti: *Type_Info) {
     }
 }
 
+TEMP_IDENT :: "\\temp";
 push_temporary :: () -> string {
     using context.current_procedure;
-    name := tprint("temp_%", formatInt(nb_temporaries, minimum_digits = 2));
+    name := tprint("%_%", TEMP_IDENT, formatInt(nb_temporaries, minimum_digits = 2));
     mem := member(.NONE);
     mem.hot = 999;
     table_add(*members, name, mem);
@@ -65,15 +66,20 @@ pop_member :: (name: string) {
 
 pop_temporary :: (name: string) {
     using context.current_procedure;
-    ok := table_remove(*members, name); 
+    if !is_temporary(name) return; // Has merge with other member
+    found := table_remove(*members, name); 
+    assert(found);
     for *slots {
         if it.member == name {
             it.member = "";
         }
     }
-    assert(ok, "Member % couldn't be found", name);
     log_verbose("Popping temporary %", name);
     nb_temporaries -= 1;
+}
+
+is_temporary :: (name: string) -> bool {
+    return begins_with(name, TEMP_IDENT);
 }
 
 get_member :: (name: string) -> *Member {

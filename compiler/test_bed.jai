@@ -10,10 +10,12 @@ main :: () {
 }
 
 write_sprite :: () {
-    a : *u8 = xx 0x8001;
-    while a <= xx 0x800F {
+    low := 0x01;
+    base : * u8 = xx 0x8000;
+    while low < 0x10 {
+        a : * u8 = base + low;
         a.* = 0b1001_1001;
-        a += 2;
+        low += 2;
     }
 }
 
@@ -30,6 +32,8 @@ disable_lcd :: () {
 // Special instructions intrinsics
 di :: () #elsewhere;
 ei :: () #elsewhere;
+lo :: (v: u16) -> u8 #elsewhere;
+hi :: (v: u16) -> u8 #elsewhere;
 halt :: () #elsewhere;
 reti :: () #elsewhere;
 sp :: (addr: u16) #elsewhere;

@@ -53,7 +53,7 @@ gather :: (msg: *Message_Typechecked, procedures: *[..]*Code_Procedure_Header) {
                     if proc_header.procedure_flags & .ELSEWHERE then continue;
                     array_add(procedures, proc_header);
                 } else {
-                    error(tprint("Unhanded top level declaration: %", decl.expression.kind));
+                    error(tprint("Unhandled top level declaration: %", decl.expression.kind));
                     return;
                 }
             }
@@ -228,7 +228,8 @@ compile_statement :: () {
                 type_member(decl.name, t);
             } 
             if decl.expression != null {
-                compile_expression(decl.name,, current_node = decl.expression);
+                name := decl.name;
+                compile_expression(*name,, current_node = decl.expression);
             }
 
             return;
@@ -279,7 +280,7 @@ compile_statement :: () {
 
             if op == {
                 case #char "="; {
-                    compile_expression(left,, current_node = bin_op.right);
+                    compile_expression(*left,, current_node = bin_op.right);
                 }
                 case .PLUS_ASSIGN; #through;
                 case .MINUS_ASSIGN; #through;
@@ -299,7 +300,7 @@ compile_statement :: () {
 
                     temp := push_temporary();
                     defer pop_temporary(temp);
-                    compile_expression(temp,, current_node = bin_op.right);
+                    compile_expression(*temp,, current_node = bin_op.right);
 
                     arithmetic_instruction(get_instruction(op), left, temp);
                     set_member_location(left, .A);
@@ -325,7 +326,8 @@ compile_statement :: () {
                 temp := push_temporary();
                 defer pop_temporary(temp);
                 set_member_location(temp, .A);
-                compile_expression(temp,, current_node = ret.arguments_sorted[0]);
+                compile_expression(*temp,, current_node = ret.arguments_sorted[0]);
+                move_member(temp, .A);
             }
             output_bytes(.RET);
             context.current_procedure.return_added = true;
@@ -354,11 +356,11 @@ compile_statement :: () {
             jumps := compile_condition(,, current_node = w.condition);
             if jumps.count == 0 then return; 
             compile_block(,, current_node = w.block);
+            reconcile_slots(initial_members);
             jump_to(loop_start);
             for jumps {
                 end_jump(it);
             }
-            reconcile_slots(initial_members);
         }
         case; {
             error(tprint("Unhandled statement kind: %", node.kind));
@@ -404,11 +406,11 @@ rvalue :: (node: *Code_Node) -> ok: bool, member: string, pointer: bool {
     }
 }
 
-compile_expression :: (target_member: string) {
+compile_expression :: (target_member: *string) {
     node := context.current_node;
     log_verbose("Expression %", node.kind);
     cool_members();
-    warm(target_member);
+    warm(target_member.*);
     if node.kind == {
         case .LITERAL; {
             lit := node.(*Code_Literal);
@@ -428,11 +430,11 @@ compile_expression :: (target_member: string) {
                         return;
                     }
 
-                    if get_member_type(target_member) == .NONE {
+                    if get_member_type(target_member.*) == .NONE {
                         log_verbose("Typing member: % - %", target_member, type);
-                        type_member(target_member, type);
+                        type_member(target_member.*, type);
                     }
-                    reg := ensure_member_in_register(target_member);
+                    reg := ensure_member_in_register(target_member.*);
                     if type == {
                         case .U8; {
                             load_imm8(reg, lit._u64.(u8));
@@ -446,10 +448,10 @@ compile_expression :: (target_member: string) {
                     return;
                 }
                 case .BOOLEAN;{
-                    if get_member_type(target_member) == .NONE {
-                        type_member(target_member, .U8);
+                    if get_member_type(target_member.*) == .NONE {
+                        type_member(target_member.*, .U8);
                     }
-                    reg := ensure_member_in_register(target_member);
+                    reg := ensure_member_in_register(target_member.*);
                     load_imm8(reg, lit._u64.(u8));
                     return;
                 }
@@ -464,10 +466,10 @@ compile_expression :: (target_member: string) {
             op : Operator_Type = xx bin_op.operator_type;
             right := push_temporary();
             defer pop_temporary(right);
-            compile_expression(right,, current_node = bin_op.right);
+            compile_expression(*right,, current_node = bin_op.right);
             left := push_temporary();
             defer pop_temporary(left);
-            compile_expression(left,, current_node = bin_op.left); 
+            compile_expression(*left,, current_node = bin_op.left); 
 
             instr: Arithmetic_Instruction;
             if op == {
@@ -480,27 +482,38 @@ compile_expression :: (target_member: string) {
                     return;
                 }
             }
+            if (is_wide(left) || is_wide(right)) && instr == .SUB {
+                error(tprint("Unhandled wide binary operator expression '%'", operator_to_string2(op)));
+                return;
+
+            }
             arithmetic_instruction(instr, left, right);
-            if get_member_type(target_member) == .NONE {
+            if get_member_type(target_member.*) == .NONE {
                 lt := get_member_type(left);
                 rt := get_member_type(right);
                 if lt == rt {
-                    type_member(target_member, lt);
+                    type_member(target_member.*, lt);
                 } else {
-                    type_member(target_member, auto_deduce_type(lt, rt));
+                    type_member(target_member.*, auto_deduce_type(lt, rt));
                 }
             }
-            if !is_wide(target_member) {
-                set_member_location(target_member, .A);
+            if !is_wide(target_member.*) {
+                set_member_location(target_member.*, .A);
             } else {
-                set_member_location(target_member, .HL);
+                set_member_location(target_member.*, .HL);
             }
         } 
         case .IDENT; {
             ident := node.(*Code_Ident);
-            type_member(target_member, get_member_type(ident.name));
-            l := ensure_member_in_register(target_member);
-            copy_member_to(ident.name, l);
+            if is_temporary(target_member.*) {
+                log_verbose(tprint("Removing temporary %, because it maps to ident %", target_member.*, ident.name));
+                pop_temporary(target_member.*);
+                target_member.* = ident.name;
+            } else {
+                type_member(target_member.*, get_member_type(ident.name));
+                l := ensure_member_in_register(target_member.*);
+                copy_member_to(ident.name, l);
+            }
         }
         case .PROCEDURE_CALL; {
             call := node.(*Code_Procedure_Call);
@@ -513,13 +526,13 @@ compile_expression :: (target_member: string) {
                 return;
             }
             if call.num_return_values_received != 0 {
-                if member_location(target_member) != .A { 
+                if member_location(target_member.*) != .A { 
                     force_empty(.A);
                 }
             }
             add_call(call.resolved_procedure_expression.(*Code_Procedure_Header));
             if call.num_return_values_received != 0 {
-                set_member_location(target_member, .A);
+                set_member_location(target_member.*, .A);
             }
         }
         case .CAST; {
@@ -533,7 +546,7 @@ compile_expression :: (target_member: string) {
                 compile_expression(target_member,, current_node = cst.expression);
                 return;
             } else {
-                cast_member(target_member, to_gb_type(cst.target_type.result));
+                cast_member(target_member.*, to_gb_type(cst.target_type.result));
                 compile_expression(target_member,, current_node = cst.expression);
             }
         }
@@ -556,7 +569,7 @@ compile_condition :: () -> [..]int {
             right := push_temporary();
             defer pop_temporary(right);
 
-            compile_expression(right,, current_node = bin_op.right);
+            compile_expression(*right,, current_node = bin_op.right);
             if get_member_type(right) == {
                 case .U8; #through;
                 case .U16; { }
@@ -568,23 +581,22 @@ compile_condition :: () -> [..]int {
 
             left := push_temporary();
             defer pop_temporary(left);
-            compile_expression(left,, current_node = bin_op.left); 
+            compile_expression(*left,, current_node = bin_op.left); 
             r := ensure_member_in_register(right);
             l := ensure_member_in_register(left);
 
             if !is_wide(right) && !is_wide(left) {
-                jump_kind: Jump_Kind;
+                arithmetic_instruction(.CP, left, right); 
                 if op == {
-                    case .IS_EQUAL; jump_kind =  .IF_NON_ZERO;
-                    case .IS_NOT_EQUAL; jump_kind =  .IF_ZERO;
-                    case #char "<"; jump_kind =  .IF_CARRY;
+                    case .IS_EQUAL; array_add(*jumps, begin_jump(.IF_NON_ZERO));
+                    case .IS_NOT_EQUAL; array_add(*jumps, begin_jump(.IF_ZERO));
+                    case #char "<"; array_add(*jumps, begin_jump(.IF_NON_CARRY));
+                    case .LESS_OR_EQUAL; array_add(*jumps, begin_jump(.IF_CARRY), begin_jump(.IF_NON_ZERO));
                     case; { 
                         error(tprint("Unhandled short binary operator comparison '%'", operator_to_string2(op))); 
                         return jumps;
                     }
                 }
-                arithmetic_instruction(.CP, left, right); 
-                array_add(*jumps, begin_jump(jump_kind));
             } else { // One or both is wide
                 hi_l, lo_l := split_register(l);
                 hi_r, lo_r := split_register(r);
@@ -610,15 +622,20 @@ compile_condition :: () -> [..]int {
                         arithmetic_instruction(.CP, hi_l, hi_r);
                         array_add(*jumps, begin_jump(.IF_ZERO));
                     }
-                    case .LESS_OR_EQUAL; {
-                        if hi_l == .NONE {
-                            // Always below
-                            return jumps;
-                        }
-                        arithmetic_instruction(.SUB, left, right);
-                        array_add(*jumps, begin_jump(.IF_CARRY));
-                        array_add(*jumps, begin_jump(.IF_NON_ZERO));
-                    }
+                    // @TODO
+                    // case .LESS_OR_EQUAL; {
+                    //     if hi_l == .NONE {
+                    //         // Always below
+                    //         return jumps;
+                    //     }
+                    //     force_empty(.A);
+                    //     load_instruction(.A, lo_l);
+                    //     arithmetic_instruction(.SUB, .A, lo_r);
+                    //     array_add(*jumps, begin_jump(.IF_NON_CARRY));
+                    //     load_instruction(.A, hi_l);
+                    //     arithmetic_instruction(.SBC, .A, hi_r);
+                    //     array_add(*jumps, begin_jump(.IF_NON_ZERO));
+                    // }
                     case; {
                         error(tprint("Unhandled wide binary operator comparison '%'", operator_to_string2(op))); 
                         return jumps;
@@ -634,7 +651,7 @@ compile_condition :: () -> [..]int {
             defer pop_temporary(temp);
             set_member_location(temp, .A);
 
-            compile_expression(temp,, current_node = node);
+            compile_expression(*temp,, current_node = node);
             output_bytes(.CP_D8, 0x1);
             array_add(*jumps, begin_jump(.IF_NON_ZERO));
             return jumps;
@@ -660,6 +677,7 @@ Instruction_Kind :: enum u8 {
     JR_REL :: 0x18;
     JR_NZ_REL :: 0x20;
     JR_Z_REL :: 0x28;
+    JR_NC_REL :: 0x30;
     LD_SP_IMM_16 :: 0x31;
     JR_C_REL :: 0x38;
     LD_A_IMM :: 0x3E;
@@ -767,14 +785,16 @@ arithmetic_instruction :: (kind: Arithmetic_Instruction, left: string, right: st
         if hi_r != .NONE {
             other = hi_r;
         } else {
-            force_empty(.B);
-            other = .B;
+            log_verbose("Load imm");
+            other = to_register(alloc_register_skip_a());
             load_imm8(other, 0);
         }
 
         if hi_l != .NONE {
+            log_verbose("Load hi_l");
             load_instruction(.A, hi_l);
         } else {
+            log_verbose("Load 0");
             load_imm8(.A, 0);
         }
 
@@ -782,6 +802,8 @@ arithmetic_instruction :: (kind: Arithmetic_Instruction, left: string, right: st
             arithmetic_instruction(.ADC, .A, other);
         } else if kind == .SUB {
             arithmetic_instruction(.SBC, .A, other);
+        } else if kind == .OR {
+            arithmetic_instruction(.OR, .A, other);
         } else {
             error(tprint("Unhandled wide arithmetic instruction: %", kind));
             return;
@@ -911,3 +933,4 @@ log_verbose :: (format: string, args: ..Any) #expand {
 
 #import "Hash_Table";
 #import "Math";
+#import "String";

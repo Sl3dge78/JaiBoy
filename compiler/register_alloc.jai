@@ -111,6 +111,22 @@ alloc_register :: () -> Slot {
     return .STACK_MAX;
 }
 
+// @Hack
+alloc_register_skip_a :: () -> Slot {
+    using context.current_procedure;
+    if !has_free_register() {
+        spill_coldest();
+    }
+    for 1..(Slot.STACK_00 - 1) {
+        if is_empty(slots[it]) {
+            return it;
+        }
+    }
+    assert(false);
+    return .STACK_MAX;
+
+}
+
 alloc_wide_register :: () -> Slot, Slot {
     using context.current_procedure;
 

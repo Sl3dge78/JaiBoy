@@ -1,4 +1,8 @@
 main :: () {
+    result := proc();
+}
+
+proc :: () -> u8 {
     a : u8 = 1;
     b : u8 = 2;
 
@@ -9,5 +13,6 @@ main :: () {
     } else {
         c = b;
     }
+    return c;
 }
 

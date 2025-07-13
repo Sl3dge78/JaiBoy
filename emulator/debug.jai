@@ -1,10 +1,8 @@
 
 debug_window: *SDL_Window;
-DEBUG_WINDOW_W :: 500;
-DEBUG_WINDOW_H :: 500;
 state: Immediate_State;
 
-DEBUG_WINDOW_WIDTH :: 500;
+DEBUG_WINDOW_WIDTH :: 600;
 DEBUG_WINDOW_HEIGHT :: 500;
 
 TILES_TEXTURE_WIDTH :: 8 * 16;    // Tile width * 16 tiles/line
@@ -192,7 +190,7 @@ draw_tiles :: (gb: *Gameboy) {
         ptr += 2;
     }
     
-    cursor(DEBUG_WINDOW_W - TILES_TEXTURE_WIDTH, 130);
+    cursor(DEBUG_WINDOW_WIDTH - TILES_TEXTURE_WIDTH, 130);
     text("Tiles");
     SDL_UpdateTexture(tile_texture, null, data.data, TILES_TEXTURE_WIDTH * size_of(Color));
     dst := SDL_FRect.{
@@ -233,8 +231,12 @@ draw_map :: (gb: *Gameboy) {
             }
         }
     }
+    x := DEBUG_WINDOW_WIDTH - TILES_TEXTURE_WIDTH - MAP_SIZE;
+    cursor(xx x, 130);
+    text("MAP");
+
     SDL_UpdateTexture(map_texture, null, data.data, MAP_SIZE * size_of(Color));
-    dst := SDL_FRect.{ DEBUG_WINDOW_W - TILES_TEXTURE_WIDTH - MAP_SIZE, 142, MAP_SIZE, MAP_SIZE };
+    dst := SDL_FRect.{ xx x, 142, MAP_SIZE, MAP_SIZE };
     SDL_RenderTexture(state.renderer, map_texture, null, *dst);
     //
     //     glBindTexture(GL_TEXTURE_2D, map_1_tex);

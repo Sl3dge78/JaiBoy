@@ -94,6 +94,7 @@ Jump_Kind :: enum {
     IF_ZERO;
     ALWAYS;
     IF_CARRY;
+    IF_NON_CARRY;
 
     NONE;
 }
@@ -105,6 +106,7 @@ begin_jump :: (kind: Jump_Kind) -> int {
         case .IF_NON_ZERO; output_bytes(.JR_NZ_REL, 0x00);
         case .IF_ZERO; output_bytes(.JR_Z_REL, 0x00);
         case .IF_CARRY; output_bytes(.JR_C_REL, 0x00);
+        case .IF_NON_CARRY; output_bytes(.JR_NC_REL, 0x00);
         case .ALWAYS; output_bytes(.JR_REL, 0x00);
         case .NONE; assert(false, "Invalid jump");
     };
@@ -128,9 +130,10 @@ mark_jump :: () -> int {
 jump_to :: (addr: int) {
     using context.current_procedure;
     current_addr := bytes.count;
-    distance := current_addr - addr;
+    distance : s8 = xx (addr - current_addr);
+    distance -= 2; // Size of JR_REL
     assert(distance <= 127 && distance >= -128, "Long jumps arent supported yet");
-    output_bytes(.JR_REL, cast,no_check(u8)(distance.(s8)));
+    output_bytes(.JR_REL, cast,no_check(u8)(distance));
 }
 
 add_call :: (proc: *Code_Procedure_Header) {

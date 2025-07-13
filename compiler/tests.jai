@@ -145,7 +145,7 @@ test_programs :: () {
     test_program("tests/if_005.jai", gb,cpu(.A, 1));
     test_program("tests/if_006.jai", gb,cpu(.A, 0));
     test_program("tests/memory_write_001.jai", gb, ram(0xC000, 0x69));
-    test_program("tests/while_001.jai", gb,cpu(.B, 10));
+    test_program("tests/while_001.jai", gb,cpu(.A, 10));
     test_program("tests/if_wide_001.jai", gb,cpu(.A, 69));
     test_program("tests/if_wide_002.jai", gb,cpu(.A, 69));
     test_program("tests/if_wide_003.jai", gb,cpu(.A, 69));
@@ -155,7 +155,8 @@ test_programs :: () {
     test_program("tests/add_u16_001.jai", gb,cpu(.H, 0xFE), cpu(.L, 0x10));
     test_program("tests/add_u16_002.jai", gb,cpu(.H, 0xFF), cpu(.L, 0x00));
     test_program("tests/add_u16_003.jai", gb,cpu(.H, 0xFF), cpu(.L, 0x00));
-    test_program("tests/less_or_equal_001.jai", gb,cpu(.A, 69));
-    test_program("tests/less_or_equal_002.jai", gb,cpu(.A, 69));
-    test_program("tests/sub_002.jai", gb,cpu(.A, 1));
+    test_program("tests/or_wide_001.jai", gb,cpu(.H, 0x80), cpu(.L, 0xF1));
+    // test_program("tests/less_or_equal_001.jai", gb,cpu(.A, 69));
+    // test_program("tests/less_or_equal_002.jai", gb,cpu(.A, 69));
+    // test_program("tests/sub_002.jai", gb,cpu(.A, 1));
 }

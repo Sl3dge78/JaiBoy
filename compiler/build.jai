@@ -1,10 +1,10 @@
 #run build_and_output_rom();
 
 build_and_output_rom :: () {
-    #if 0 {
-    cart := build_cart("test_bed.jai",, log_level = .VERBOSE);
+    #if 1 {
+        cart := build_cart("test_bed.jai",, log_level = .VERBOSE);
     } else {
-        file := "tests/if_wide_001.jai";
+        file := "tests/while_001.jai";
         f := read_entire_file(file);
         log("%", f);
         cart := build_cart(file,, log_level = .VERBOSE);
