@@ -3,10 +3,11 @@ main :: () {
     sp(0xCFFF);
     di();
     disable_lcd();
+    set_palette();
     write_sprite();
     enable_lcd();
     ei();
-    halt();
+    while true {}
 }
 
 write_sprite :: () {
@@ -21,7 +22,12 @@ write_sprite :: () {
 
 enable_lcd :: () {
     lcdc: *u8 = xx 0xFF40;
-    lcdc.* = 0b1000_0001;
+    lcdc.* = 0b1001_0001;
+}
+
+set_palette :: () {
+    bgp : *u8 = xx 0xFF47;
+    bgp.* = 0b1110_0100;
 }
 
 disable_lcd :: () {

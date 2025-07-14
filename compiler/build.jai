@@ -13,6 +13,10 @@ build_and_output_rom :: () {
     filename := "output_rom.gb";
     write_entire_file(filename, cart.contents.data, cart.contents.count);
     log("Wrote %", filename);
+    img := convert_image_to_gb("test.png");
+    for img {
+        log("0b%", formatInt(it, base = 2, minimum_digits = 8));
+    }
 }
 
 
@@ -23,3 +27,5 @@ build_and_output_rom :: () {
 #import "File";
 #import "Program_Print";
 #import "Math";
+#load "../common/utils.jai";
+

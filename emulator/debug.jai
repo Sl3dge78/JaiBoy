@@ -231,7 +231,7 @@ draw_map :: (gb: *Gameboy) {
             }
         }
     }
-    x := DEBUG_WINDOW_WIDTH - TILES_TEXTURE_WIDTH - MAP_SIZE;
+    x := DEBUG_WINDOW_WIDTH - TILES_TEXTURE_WIDTH - MAP_SIZE - 1;
     cursor(xx x, 130);
     text("MAP");
 
