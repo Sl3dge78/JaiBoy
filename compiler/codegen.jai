@@ -1,8 +1,16 @@
 #add_context current_procedure: *Compiled_Procedure;
 #add_context current_node: *Code_Node;
+#add_context constants: []Constant;
+
+Constant :: struct {
+    name : string;
+    address : u16;
+    value : []u8;
+}
 
 build_cart :: (file: string) -> MBC1 {
     log_verbose("%", file);
+    set_build_options_dc(.{do_output = false});
     w := compiler_create_workspace();
     
     options := get_build_options();
@@ -10,6 +18,7 @@ build_cart :: (file: string) -> MBC1 {
     options.runtime_support_definitions = .OMIT;
 
     procedures : [..] *Code_Procedure_Header;
+    constants : [..] Constant;
 
     set_build_options(options, w);
     compiler_begin_intercept(w);
@@ -20,22 +29,26 @@ build_cart :: (file: string) -> MBC1 {
         if !msg continue;
         if msg.kind == .TYPECHECKED {
             tc := cast(*Message_Typechecked) msg;
-            gather(tc, *procedures);
+            if !gather(tc, *procedures, *constants) then return .{};
         }
 
         if msg.kind == .COMPLETE {
-            break;
+            com := msg.(*Message_Complete);
+            if com.error_code != 0 {
+                return .{};
+            } else {
+                break;
+            }
         }
 
     }
     compiler_end_intercept(w);
-    set_build_options_dc(.{do_output = false});
-    ok, cart := generate_assembly(procedures);
+    ok, cart := generate_assembly(constants, procedures);
     assert(ok);
     return cart;
 }
 
-gather :: (msg: *Message_Typechecked, procedures: *[..]*Code_Procedure_Header) {
+gather :: (msg: *Message_Typechecked, procedures: *[..]*Code_Procedure_Header, constants: *[..] Constant) -> bool {
     for tc: msg.all {
         expr := tc.expression;
         if expr.enclosing_load {
@@ -48,25 +61,74 @@ gather :: (msg: *Message_Typechecked, procedures: *[..]*Code_Procedure_Header) {
                 if decl.type_inst != null {
                     log("type inst: %", decl.type_inst);
                 }
-                if decl.expression.kind == .PROCEDURE_HEADER {
-                    proc_header := cast(*Code_Procedure_Header) decl.expression;
-                    if proc_header.procedure_flags & .ELSEWHERE then continue;
-                    array_add(procedures, proc_header);
-                } else {
-                    error(tprint("Unhandled top level declaration: %", decl.expression.kind));
-                    return;
+                if !(decl.flags & .IS_CONSTANT) {
+                    fatal(tprint("Non constant top level declaration: % (%)", decl.name, decl.*));
+                    return false;
+                }
+
+                if decl.expression.kind == {
+                    case .PROCEDURE_HEADER; {
+                        proc_header := cast(*Code_Procedure_Header) decl.expression;
+                        if proc_header.procedure_flags & .ELSEWHERE then continue;
+                        if proc_header.procedure_flags & .COMPILE_TIME_ONLY then continue;
+                        array_add(procedures, proc_header);
+                    }
+                    case .LITERAL; {
+                        lit := decl.expression.(*Code_Literal);
+                        if lit.value_type == {
+                            case .ARRAY; {
+                                values := lit.array_literal_info;
+                                data := NewArray(values.array_members.count, u8);
+                                for values.array_members {
+                                    assert(it.kind == .LITERAL);
+                                    value_literal := it.(*Code_Literal);
+                                    assert(value_literal.value_type == .NUMBER);
+                                    data[it_index] = xx value_literal._u64;
+                                }
+                                log_verbose(tprint("Added constant %", decl.name));
+                                array_add(constants, .{ decl.name, 0, data });
+
+                            }
+                            case; {
+                                fatal(tprint("Unhandled constant literal: %", lit.value_type));
+                                return false;
+
+                            }
+
+                        }
+                    }
+                    case; {
+                        fatal(tprint("Unhandled top level declaration: %", decl.expression.kind));
+                        return false;
+                    }
                 }
             }
             case; {
+                // log("Ignored: %", expr.kind);
                 // We don't care about the rest. yet!
             }
         }
     }
+    return true;
 }
 
-generate_assembly :: (procedures: [..]*Code_Procedure_Header) -> bool, MBC1 {
+generate_assembly :: (constants: [..] Constant, procedures: [..]*Code_Procedure_Header) -> bool, MBC1 {
     compiled : [..]Compiled_Procedure;
     errored := false;
+
+    // Place constants
+    base_constant_address : u16 = 0x4000;
+    for *constants {
+        it.address = base_constant_address;
+        base_constant_address += it.value.count.(u16);
+    }
+    if base_constant_address > 0x7FFF {
+        log_error("Too many constants!");
+        return false, .{};
+    }
+
+    context.constants = constants;
+
     for procedures {
         proc := generate_procedure(it);
 
@@ -100,11 +162,11 @@ generate_assembly :: (procedures: [..]*Code_Procedure_Header) -> bool, MBC1 {
         log_verbose("%", builder_to_string(*builder));
     }
 
-    cart := output_rom(compiled);
+    cart := output_rom(compiled, constants);
     return true, cart;
 }
 
-output_rom :: (compiled: []Compiled_Procedure) -> MBC1 {
+output_rom :: (compiled: []Compiled_Procedure, constants: [] Constant) -> MBC1 {
     builder: String_Builder;
     cart := New(MBC1,, temp);
 
@@ -113,6 +175,9 @@ output_rom :: (compiled: []Compiled_Procedure) -> MBC1 {
         assert(it.base_address != 0, "Procedure \"%\" wasn't placed in program!", it.procedure_header.name);
         i := it.base_address;
         memcpy(cart.contents.data + i, it.bytes.data, it.bytes.count);
+    }
+    for constants {
+        memcpy(cart.contents.data + it.address, it.value.data, it.value.count);
     }
 
     return cart;
@@ -123,7 +188,7 @@ disassemble_procedure :: (builder: *String_Builder, proc: Compiled_Procedure) {
 }
 
 generate_procedure :: (proc: *Code_Procedure_Header) -> Compiled_Procedure {
-    log_verbose("Compiling %", proc.name);
+    log_verbose("==== Compiling %", proc.name);
     result: Compiled_Procedure;
     result.procedure_header = proc;
     assert(proc.body_or_null != null, "Procedure didn't compile?");
@@ -269,10 +334,11 @@ compile_statement :: () {
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
             op : Operator_Type = xx bin_op.operator_type;
-            ok, left, pointer := rvalue(bin_op.left);
+            ok, left, pointer_to := rvalue(bin_op.left);
             if !ok then return;
             defer {
-                if pointer {
+                if pointer_to != "" {
+                    move_member(pointer_to, .HL);
                     load_instruction(.HL_INDIRECT, to_opcode(member_location(left)));
                     pop_temporary(left);
                 }
@@ -369,12 +435,12 @@ compile_statement :: () {
     }
 }
 
-rvalue :: (node: *Code_Node) -> ok: bool, member: string, pointer: bool {
+rvalue :: (node: *Code_Node) -> ok: bool, member: string, pointer_to: string {
     using context.current_procedure;
     if node.kind == {
         case .IDENT; {
             ident := node.(*Code_Ident);
-            return true, ident.name, pointer = false;
+            return true, ident.name, pointer_to = "";
         }
         case .UNARY_OPERATOR; {
             unary := node.(*Code_Unary_Operator);
@@ -383,7 +449,7 @@ rvalue :: (node: *Code_Node) -> ok: bool, member: string, pointer: bool {
                 case .POSTFIX_DEREFERENCE; #through;
                 case .POINTER_DEREFERENCE; {
                     ok, name := rvalue(unary.subexpression);
-                    if !ok then return false, "", pointer = false;
+                    if !ok then return false, "", pointer_to = "";
                     move_member(name, .HL);
 
                     temp := push_temporary();
@@ -392,17 +458,17 @@ rvalue :: (node: *Code_Node) -> ok: bool, member: string, pointer: bool {
                     slots[slot].part = .FULL;
                     load_instruction(to_opcode(to_register(slot)), .HL_INDIRECT);
 
-                    return true, temp, pointer = true;
+                    return true, temp, pointer_to = name;
                 }
                 case; {
                     error(tprint("Unsupported unary operator rvalue: %", operator_to_string2(xx unary.operator_type)));
-                    return false, "", pointer = false;
+                    return false, "", pointer_to = "";
                 }
             }
         }
         case; 
             error(tprint("Unsupported rvalue: %", node.kind));
-            return false, "", pointer = false;
+            return false, "", pointer_to = "";
     }
 }
 
@@ -464,15 +530,32 @@ compile_expression :: (target_member: *string) {
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
             op : Operator_Type = xx bin_op.operator_type;
-            right := push_temporary();
-            defer pop_temporary(right);
-            compile_expression(*right,, current_node = bin_op.right);
-            left := push_temporary();
-            defer pop_temporary(left);
-            compile_expression(*left,, current_node = bin_op.left); 
 
             instr: Arithmetic_Instruction;
             if op == {
+                case #char "."; {
+                    assert(bin_op.right.kind == .IDENT);
+                    assert(bin_op.left.kind == .IDENT);
+                    dot_operator(target_member.*, bin_op.left.(*Code_Ident), bin_op.right.(*Code_Ident));
+                    return;
+                }
+                case .ARRAY_SUBSCRIPT; {
+                    assert(bin_op.right.kind == .IDENT);
+                    assert(bin_op.left.kind == .IDENT);
+
+                    force_empty(.HL);
+                    ident := bin_op.left.(*Code_Ident);
+                    assert((ident.resolved_declaration.flags & .IS_CONSTANT) != 0, "Array subscript isn't constant: %", ident.resolved_declaration.*);
+                    load_imm16(.HL, get_constant_address(ident.name));
+                    force_empty(.BC);
+                    move_member(bin_op.right.(*Code_Ident).name, .BC);
+                    output_bytes(.ADD_HL_BC);
+
+                    type_member(target_member.*, .U8);
+                    reg := ensure_member_in_register(target_member.*);
+                    load_instruction(to_opcode(reg), .HL_INDIRECT);
+                    return;
+                }
                 case #char "+"; instr = .ADD;
                 case #char "-"; instr = .SUB;
                 case #char "&"; instr = .AND;
@@ -482,6 +565,15 @@ compile_expression :: (target_member: *string) {
                     return;
                 }
             }
+
+            right := push_temporary();
+            defer pop_temporary(right);
+            compile_expression(*right,, current_node = bin_op.right);
+            left := push_temporary();
+            defer pop_temporary(left);
+            compile_expression(*left,, current_node = bin_op.left); 
+
+
             if (is_wide(left) || is_wide(right)) && instr == .SUB {
                 error(tprint("Unhandled wide binary operator expression '%'", operator_to_string2(op)));
                 return;
@@ -674,7 +766,9 @@ operator_to_string2 :: (op: Operator_Type) -> string #expand {
 
 Instruction_Kind :: enum u8 {
     NOP :: 0x0;
+    ADD_HL_BC :: 0x09;
     JR_REL :: 0x18;
+    ADD_HL_DE :: 0x19;
     JR_NZ_REL :: 0x20;
     JR_Z_REL :: 0x28;
     JR_NC_REL :: 0x30;
@@ -682,6 +776,7 @@ Instruction_Kind :: enum u8 {
     JR_C_REL :: 0x38;
     LD_A_IMM :: 0x3E;
     HALT :: 0x76;
+    XOR_A :: 0xAF;
     PUSH_BC :: 0xC5;
     RET :: 0xC9;
     CALL :: 0xCD;
@@ -809,6 +904,38 @@ arithmetic_instruction :: (kind: Arithmetic_Instruction, left: string, right: st
             return;
         }
         load_instruction(Register.H, Register.A);
+    }
+}
+
+dot_operator :: (target_member: string, left: *Code_Ident, right: *Code_Ident) {
+    ti := left.resolved_declaration.type;
+    if ti.type == {
+        case .ARRAY; {
+            ti_arr := ti.(*Type_Info_Array);
+            if right.name == {
+                case "count"; {
+                    if ti_arr.array_count > -1 {
+                        if ti_arr.array_count > 0xFF {
+                            error("Wide arrays aren't supported yet");
+                            return;
+                        }
+                        type_member(target_member, .U8);
+                        reg := ensure_member_in_register(target_member);
+                        load_imm8(reg, xx ti_arr.array_count);
+                        return;
+                    } else {
+                        error(tprint("Runtime arrays aren't supported yet"));
+                        return;
+                    }
+                }
+                case; error(tprint("Unhandled member % in array", right.name)); return;
+            }
+        }
+        case; {
+            error(tprint("Unhandled type with dot operator: %", ti.type));
+            return;
+
+        }
     }
 }
 

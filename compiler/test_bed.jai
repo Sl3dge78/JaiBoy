@@ -11,12 +11,12 @@ main :: () {
 }
 
 write_sprite :: () {
-    low := 0x01;
+    i := 0;
     base : * u8 = xx 0x8000;
-    while low < 0x10 {
-        a : * u8 = base + low;
-        a.* = 0b1001_1001;
-        low += 2;
+    while i < tiles.count {
+        a : * u8 = base + i;
+        a.* = tiles[i];
+        i += 1;
     }
 }
 
@@ -43,3 +43,6 @@ hi :: (v: u16) -> u8 #elsewhere;
 halt :: () #elsewhere;
 reti :: () #elsewhere;
 sp :: (addr: u16) #elsewhere;
+
+tiles :: u8.[0xff,0x0,0x81,0x7e,0x81,0x7e,0x81,0x7e,0x81,0x7e,0x81,0x7e,0x81,0x7e,0xff,0x0,];
+

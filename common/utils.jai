@@ -1,7 +1,7 @@
 #import "stb_image";
-#import,dir "../modules/jai-sdl3";
+#import "Basic";
 
-convert_image_to_gb :: (file: string) -> [] u8 {
+load_gb_image :: (file: string) -> [] u8 #compile_time { 
     x : s32;
     y : s32;
     channels: s32;
@@ -29,54 +29,23 @@ convert_image_to_gb :: (file: string) -> [] u8 {
                 b2 : u8 = 0;
                 for px : 0..7 {
                     val := pixels[sprite + px + py * 8];
-                    log("s: %, x: %, y: % = 0x%", sprite, px, py, formatInt(val, base = 16));
                     bit_1 := (val == col01 || val == col11);
                     bit_2 := (val == col10 || val == col11);
                     if bit_1 then b1 |= (1).(u8) << (7-px).(u8);
                     if bit_2 then b2 |= (1).(u8) << (7-px).(u8);
                 }
-                result[sprite + py] = b1;
-                result[sprite + py + 1] = b2;
+                result[sprite + py * 2] = b1;
+                result[sprite + py * 2 + 1] = b2;
             }
         }
     }
 
+    builder: String_Builder;
+    print_to_builder(*builder, ".[");
+    for result {
+        print_to_builder(*builder, "0x%,", formatInt(it, base = 16));
+    }
+    print_to_builder(*builder, "];");
+    log("%", builder_to_string(*builder));
     return result; 
-
-    surface := SDL_CreateSurfaceFrom(x, y, .RGBA8888, img, 4 * size_of(u8) * x);
-    defer SDL_DestroySurface(surface);
-
-    palette := SDL_CreatePalette(4);
-    colors := SDL_Color.[
-    ];
-    cspace := SDL_GetSurfaceColorspace(surface);
-    SDL_SetPaletteColors(palette, colors.data, 0, colors.count);
-    new := SDL_ConvertSurfaceAndColorspace(surface, .INDEX8, palette, cspace, 0);
-    assert(new != null, "%", SDL_GetError());
-    defer SDL_DestroySurface(new);
-
-    SDL_LockSurface(new);
-    {
-        pixels : *u8 = xx new.pixels;
-        for 0..(x * y) {
-            log("%", pixels[it]);
-        }
-        for sy : 0..nb_y - 1 {
-            for sx : 0..nb_x - 1 {
-                sprite := sx * 8 + sy * 8 * nb_x;
-                for py : 0..7 {
-                    b1 : u8 = 0;
-                    b2 : u8 = 0;
-                    for px : 0..7 {
-                        val := pixels[sprite + px + py * 8];
-                        log("s: %, x: %, y: % = %", sprite, px, py, val);
-                    }
-                }
-            }
-        }
-    }
-
-    SDL_UnlockSurface(new);
-    return result;
 }
-

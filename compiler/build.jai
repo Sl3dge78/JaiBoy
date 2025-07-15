@@ -1,10 +1,11 @@
 #run build_and_output_rom();
 
 build_and_output_rom :: () {
-    #if 1 {
+    log("%", load_gb_image("test.png"));
+    #if 0 {
         cart := build_cart("test_bed.jai",, log_level = .VERBOSE);
     } else {
-        file := "tests/while_001.jai";
+        file := "tests/array_002.jai";
         f := read_entire_file(file);
         log("%", f);
         cart := build_cart(file,, log_level = .VERBOSE);
@@ -13,10 +14,6 @@ build_and_output_rom :: () {
     filename := "output_rom.gb";
     write_entire_file(filename, cart.contents.data, cart.contents.count);
     log("Wrote %", filename);
-    img := convert_image_to_gb("test.png");
-    for img {
-        log("0b%", formatInt(it, base = 2, minimum_digits = 8));
-    }
 }
 
 

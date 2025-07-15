@@ -168,11 +168,13 @@ alloc_any :: () -> Slot {
 
 alloc_any_wide :: () -> hi: Slot, lo: Slot {
     using context.current_procedure;
-    for slots {
-        if xx it_index == Slot.A then continue;
-        if is_empty(it) && is_empty(slots[it_index + 1]) {
-            return xx it_index, xx (it_index + 1);
+    i := 1;
+    while i < slots.count {
+        if xx i == Slot.A then continue;
+        if is_empty(slots[i]) && is_empty(slots[i + 1]) {
+            return xx i, xx (i + 1);
         }
+        i += 2;
     }
     assert(false);
     return .STACK_MAX, .STACK_MAX;
@@ -227,6 +229,7 @@ force_empty :: (register: Register) {
 
 move :: (from: Slot, to: Slot) {
     using context.current_procedure;
+    log_verbose("move");
     copy(from, to);
     slots[to] = slots[from];
     slots[from].member = "";

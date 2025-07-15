@@ -277,13 +277,18 @@ move_member :: (name: string, new: Register) {
     log_verbose("Moving % to %", name, new);
     using context.current_procedure;
     if !is_wide(name) {
-        assert(!is_wide(new));
+        log_verbose("small");
+        hi, lo := split_register(new);
         ok, src := find_single(name);
         assert(ok);
-        dst := to_slot(new);
+        dst := to_slot(lo);
         if src == dst then return; // Nothing to do
-        force_empty(new);
+        force_empty(lo);
         move(src, dst);
+        if hi != .NONE {
+            output_bytes(.XOR_A);
+            load_instruction(hi, .A);
+        }
     } else {
         assert(is_wide(new), "Moving from a wide to small register");
         hi_n, lo_n := split_wide_slot(new);
@@ -378,3 +383,12 @@ print_members :: () {
     log_verbose("{ % }", builder_to_string(*builder));
 }
 
+get_constant_address :: (name: string) -> u16 {
+    for context.constants {
+        if it.name == name {
+            return it.address;
+        }
+    }
+    assert(false, "Constant % not found", name);
+    return 0;
+}
