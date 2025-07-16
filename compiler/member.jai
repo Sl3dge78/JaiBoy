@@ -275,12 +275,13 @@ ensure_wide_members_in_bc_de :: (a: string, b: string) {
 
 move_member :: (name: string, new: Register) {
     log_verbose("Moving % to %", name, new);
+    defer log_verbose("Done moving % to %", name, new);
     using context.current_procedure;
     if !is_wide(name) {
-        log_verbose("small");
         hi, lo := split_register(new);
         ok, src := find_single(name);
         assert(ok);
+        log_verbose("(its in %)", src);
         dst := to_slot(lo);
         if src == dst then return; // Nothing to do
         force_empty(lo);
@@ -298,7 +299,7 @@ move_member :: (name: string, new: Register) {
             set_member_location(name, new);
             return;
         }
-        assert(ok, "% not found", name);
+        log_verbose("(its in % | %)", hi_m, lo_m);
         if lo_n == lo_m && hi_n == hi_m then return; // Nothing to do;
         force_empty(new);
         move_wide(hi_m, lo_m, hi_n, lo_n);

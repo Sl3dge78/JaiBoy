@@ -5,7 +5,7 @@ build_and_output_rom :: () {
     #if 0 {
         cart := build_cart("test_bed.jai",, log_level = .VERBOSE);
     } else {
-        file := "tests/array_002.jai";
+        file := "tests/array_003.jai";
         f := read_entire_file(file);
         log("%", f);
         cart := build_cart(file,, log_level = .VERBOSE);

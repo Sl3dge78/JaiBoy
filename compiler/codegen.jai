@@ -265,6 +265,8 @@ compile_block :: () {
         push_member(it.name, t);
     }
 
+    stack_size := context.current_procedure.stack_size;
+
     if block.block_type != .IMPERATIVE {
         error(tprint("Unhandled block type: %", block.block_type));
         return;
@@ -279,6 +281,15 @@ compile_block :: () {
     for block.members {
         pop_member(it.name);
     }
+
+    // Clear stack
+    new_stack_size := context.current_procedure.stack_size;
+    diff := new_stack_size - stack_size;
+    log_verbose("Stack size ! % vs %", new_stack_size, stack_size);
+    if diff != 0 {
+        output_bytes(.ADD_SP_S8, cast,no_check(u8)diff);
+    }
+    context.current_procedure.stack_size = stack_size;
 }
 
 compile_statement :: () {
@@ -764,32 +775,6 @@ operator_to_string2 :: (op: Operator_Type) -> string #expand {
     }
 }
 
-Instruction_Kind :: enum u8 {
-    NOP :: 0x0;
-    ADD_HL_BC :: 0x09;
-    JR_REL :: 0x18;
-    ADD_HL_DE :: 0x19;
-    JR_NZ_REL :: 0x20;
-    JR_Z_REL :: 0x28;
-    JR_NC_REL :: 0x30;
-    LD_SP_IMM_16 :: 0x31;
-    JR_C_REL :: 0x38;
-    LD_A_IMM :: 0x3E;
-    HALT :: 0x76;
-    XOR_A :: 0xAF;
-    PUSH_BC :: 0xC5;
-    RET :: 0xC9;
-    CALL :: 0xCD;
-    PUSH_DE :: 0xD5;
-    RETI :: 0xD9;
-    ADD_SP_S8 :: 0xE8;
-    PUSH_HL :: 0xE5;
-    DI :: 0xF3;
-    PUSH_AF :: 0xF5;
-    LD_HL_SP_PLUS_S8 :: 0xF8;
-    EI :: 0xFB;
-    CP_D8 :: 0xFE;
-}
 
 load_instruction :: (dst_register: Register, src_register: Register) {
     if !is_wide(dst_register) && !is_wide(src_register) {
@@ -1017,6 +1002,33 @@ to_opcode :: (r: Register) -> Operation_Target {
     return 0;
 }
 
+Instruction_Kind :: enum u8 {
+    NOP :: 0x0;
+    ADD_HL_BC :: 0x09;
+    JR_REL :: 0x18;
+    ADD_HL_DE :: 0x19;
+    JR_NZ_REL :: 0x20;
+    JR_Z_REL :: 0x28;
+    JR_NC_REL :: 0x30;
+    LD_SP_IMM_16 :: 0x31;
+    JR_C_REL :: 0x38;
+    LD_A_IMM :: 0x3E;
+    HALT :: 0x76;
+    XOR_A :: 0xAF;
+    PUSH_BC :: 0xC5;
+    RET :: 0xC9;
+    CALL :: 0xCD;
+    PUSH_DE :: 0xD5;
+    RETI :: 0xD9;
+    ADD_SP_S8 :: 0xE8;
+    PUSH_HL :: 0xE5;
+    DI :: 0xF3;
+    PUSH_AF :: 0xF5;
+    LD_HL_SP_PLUS_S8 :: 0xF8;
+    EI :: 0xFB;
+    CP_D8 :: 0xFE;
+    POP_HL :: 0xE1;
+}
 
 Cart_Header :: struct {
     blank: [0x100]u8;

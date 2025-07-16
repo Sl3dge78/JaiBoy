@@ -27,6 +27,9 @@ Slot :: enum s16 {
     H :: 5;
     L :: 6;
     STACK_00 :: 7;
+    STACK_01 :: 8;
+    STACK_02 :: 9;
+    STACK_03 :: 10;
     // ...
     STACK_MAX :: 255;
 }
@@ -210,7 +213,7 @@ is_empty :: (occupant: Occupant) -> bool {
 
 force_empty :: (register: Register) {
     log_verbose("Force empty %", register);
-    defer log_verbose("Empty!");
+    defer log_verbose("Done emptying %", register);
     if is_wide(register) {
         hi_src, lo_src := split_register(register);
         lo_s := to_slot(lo_src);
@@ -229,7 +232,6 @@ force_empty :: (register: Register) {
 
 move :: (from: Slot, to: Slot) {
     using context.current_procedure;
-    log_verbose("move");
     copy(from, to);
     slots[to] = slots[from];
     slots[from].member = "";
@@ -257,10 +259,11 @@ copy :: (from: Slot, to: Slot) {
 
 move_wide :: (from_hi: Slot, from_lo : Slot, to_hi: Slot, to_lo: Slot) {
     using context.current_procedure;
-    // @TODO Check if from == register and to == stack to use PUSH
     if from_hi == .H && from_lo == .L && to_hi >= .STACK_00 && to_lo >= .STACK_00 {
         assert(to_hi + 1 == to_lo);
         push_hl();
+    } else if from_hi == .STACK_00 && from_lo == .STACK_01 && to_hi == .H && to_lo == .L {
+        pop_hl();
     } else {
         move(from_hi, to_hi);
         move(from_lo, to_lo);
@@ -299,10 +302,10 @@ push_hl_if_not_empty :: () {
     if !is_empty(.HL) {
         log_verbose("Pushing HL to free space");
         output_bytes(.PUSH_HL);
-        stack_size += 1;
         slots[xx(Slot.STACK_00) + stack_size] = slots[Slot.H];
         stack_size += 1;
         slots[xx(Slot.STACK_00) + stack_size] = slots[Slot.L];
+        stack_size += 1;
         slots[Slot.H] = Occupant.{};
         slots[Slot.L] = Occupant.{};
     }
@@ -314,6 +317,7 @@ stack_in_hl :: (slot: Slot) {
     stack_addr := stack_size - from_top_of_stack(slot);
     force_empty(.HL);
     output_bytes(.LD_HL_SP_PLUS_S8, cast,no_check(u8)(stack_addr));
+    output_bytes(.ADD_SP_S8, cast,no_check(u8)(-stack_addr));
 }
 
 find_single :: (member: string) -> bool, Slot {
@@ -504,12 +508,22 @@ find_equivalent_occupant_in :: (table: Slot_Table, occ: Occupant) -> Slot {
 
 push :: (hi: Slot, lo: Slot) {
     using context.current_procedure;
-    stack_size += 1;
     slots[Slot.STACK_00.(int) + stack_size] = slots[hi];
     stack_size += 1;
     slots[Slot.STACK_00.(int) + stack_size] = slots[lo];
+    stack_size += 1;
     slots[hi] = Occupant.{};
     slots[lo] = Occupant.{};
+}
+
+pop :: (hi: Slot, lo: Slot) {
+    using context.current_procedure;
+    stack_size -= 1;
+    slots[lo] = slots[Slot.STACK_00.(int) + stack_size];
+    slots[Slot.STACK_00.(int) + stack_size] = Occupant.{};
+    stack_size -= 1;
+    slots[hi] = slots[Slot.STACK_00.(int) + stack_size];
+    slots[Slot.STACK_00.(int) + stack_size] = Occupant.{};
 }
 
 push_bc :: () {
@@ -525,5 +539,10 @@ push_de :: () {
 push_hl :: () {
     output_bytes(.PUSH_HL);
     push(.H, .L);
+}
+
+pop_hl :: () {
+    output_bytes(.POP_HL);
+    pop(.H, .L);
 }
 

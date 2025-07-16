@@ -158,6 +158,7 @@ test_programs :: () {
     test_program("tests/or_wide_001.jai", gb,cpu(.H, 0x80), cpu(.L, 0xF1));
     test_program("tests/array_001.jai", gb,cpu(.A, 0x69));
     test_program("tests/array_002.jai", gb,cpu(.A, 0x69));
+    test_program("tests/array_003.jai", gb, ram(0x8000, 0x42), ram(0x8001, 0x12), ram(0x8002, 0x32), ram(0x8003, 0x69));
     // test_program("tests/less_or_equal_001.jai", gb,cpu(.A, 69));
     // test_program("tests/less_or_equal_002.jai", gb,cpu(.A, 69));
     // test_program("tests/sub_002.jai", gb,cpu(.A, 1));

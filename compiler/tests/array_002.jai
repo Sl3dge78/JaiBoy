@@ -9,6 +9,7 @@ proc :: () -> u8 {
     val : u8 = 0;
     while i < arr.count {
         val = arr[i];
+        i += 1;
     }
     return val;
 }
