@@ -43,6 +43,18 @@ output_bytes :: (bytes: []u8, loc := #caller_location) {
     log_verbose("%", builder_to_string(*builder));
 }
 
+procedure_header :: () {
+    output_bytes(.PUSH_BC);
+    output_bytes(.PUSH_DE);
+    output_bytes(.PUSH_HL);
+}
+
+procedure_footer :: () {
+    output_bytes(.POP_HL);
+    output_bytes(.POP_DE);
+    output_bytes(.POP_BC);
+}
+
 disassemble_bytes :: (builder: *String_Builder, bytes: []u8, new_line : bool, base_address : u16 = 0x00) {
     i := 0;
     while i < bytes.count {

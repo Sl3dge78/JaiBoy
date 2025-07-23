@@ -5,10 +5,10 @@ main :: () {
 
 func :: () -> u8 {
     a := 0x1012;
-    if a <= 0x1013 {
-        return 69;
-    } else {
+    if a < 0x1010 {
         return 0;
+    } else {
+        return 69;
     }
 
 }

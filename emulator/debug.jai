@@ -33,7 +33,7 @@ init_debug :: () {
     x : s32 = ---;
     y : s32 = ---;
     SDL_GetWindowPosition(debug_window, *x, *y);
-    SDL_SetWindowPosition(debug_window, x - DEBUG_WINDOW_WIDTH, y);
+    SDL_SetWindowPosition(debug_window, x + DEBUG_WINDOW_WIDTH, y);
     state = init_immediate(debug_window);
     tile_texture = SDL_CreateTexture(state.renderer, .ABGR8888, .STREAMING, TILES_TEXTURE_WIDTH, TILES_TEXTURE_HEIGHT);
     map_texture = SDL_CreateTexture(state.renderer, .ABGR8888, .STREAMING, MAP_SIZE, MAP_SIZE);

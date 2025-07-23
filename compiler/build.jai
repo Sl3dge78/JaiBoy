@@ -2,10 +2,10 @@
 
 build_and_output_rom :: () {
     log("%", load_gb_image("test.png"));
-    #if 0 {
+    #if 1 {
         cart := build_cart("test_bed.jai",, log_level = .VERBOSE);
     } else {
-        file := "tests/array_003.jai";
+        file := "tests/add_u16_003.jai";
         f := read_entire_file(file);
         log("%", f);
         cart := build_cart(file,, log_level = .VERBOSE);

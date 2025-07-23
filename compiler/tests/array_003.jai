@@ -4,10 +4,9 @@ main :: () {
 }
 
 proc :: () {
-    base : *u8 = xx 0x8000;
     i := 0;
     while i < arr.count {
-        ptr : *u8 = base + i;
+        ptr : *u8 = xx (0x8000 + i);
         ptr.* = arr[i];
         i += 1;
     }

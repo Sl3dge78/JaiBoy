@@ -28,11 +28,14 @@ main :: () {
     defer SDL_Quit();
     version := SDL_GetVersion();
 
-    window := SDL_CreateWindow("JaiBoy", SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_RESIZABLE);
-    defer SDL_DestroyWindow(window);
-
-    renderer := SDL_CreateRenderer(window, null);
-    defer SDL_DestroyRenderer(renderer);
+    window : *SDL_Window;
+    renderer : *SDL_Renderer;
+    SDL_CreateWindowAndRenderer("JaiBoy", SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_RESIZABLE, *window, *renderer);
+    defer {
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+    }
+    SDL_SetWindowPosition(debug_window, 0, 0);
 
     SDL_SetRenderLogicalPresentation(renderer, SCREEN_WIDTH, SCREEN_HEIGHT, .LETTERBOX);
 
@@ -54,7 +57,7 @@ main :: () {
     }
     reset(gb);
 
-    show_debug := true;
+    show_debug := false;
     if show_debug {
         init_debug();
         gb.step_through = true;

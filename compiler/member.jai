@@ -142,7 +142,7 @@ is_wide :: (t: GB_Type) -> bool {
 
 is_wide :: (name: string) -> bool {
     member := get_member(name);
-    assert(member.type != .NONE);
+    assert(member.type != .NONE, "Trying to see if a member is wide, but it is untyped");
     result : bool;
     if to_size(member.type) == {
         case .BYTE; result = false;
@@ -310,12 +310,23 @@ copy_member_to :: (name: string, new: Register) {
     log_verbose("Copying % to %", name, new);
     using context.current_procedure;
     if !is_wide(name) {
-        assert(!is_wide(new));
         ok, src := find_single(name);
         assert(ok);
-        dst := to_slot(new);
-        if src == dst then return; // Nothing to do
-        copy(src, dst);
+        if !is_wide(new) {
+            dst := to_slot(new);
+            if src == dst then return; // Nothing to do
+            copy(src, dst);
+        } else {
+            hi_n, lo_n := split_wide_slot(new);
+            if lo_n != src {
+                copy(src, lo_n);
+            }
+            // Clear high
+            load_imm8(to_register(hi_n), 0);
+            slots[hi_n].member = name;
+            slots[hi_n].part = .HIGH;
+            slots[lo_n].part = .LOW;
+        }
     } else {
         assert(is_wide(new), "Moving from a wide to small register");
         hi_n, lo_n := split_wide_slot(new);

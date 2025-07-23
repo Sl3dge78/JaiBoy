@@ -36,6 +36,18 @@ Slot :: enum s16 {
 
 Slot_Table :: [256]Occupant;
 
+print_slot_table :: (table: Slot_Table) {
+    for 0..6 {
+        if table[it].member == "" then continue;
+        log_verbose("% : %", it.(Slot), table[it].member);
+    }
+    for 7..table.count - 1 {
+        if table[it].member == "" then continue;
+        log_verbose("STACK % : %", it, table[it].member);
+    }
+
+}
+
 to_register :: (s: Slot) -> Register {
     if s == {
         case .A; return .A;
@@ -221,7 +233,6 @@ force_empty :: (register: Register) {
         if is_empty(lo_s) && is_empty(hi_s) then return;
 
         hi_dst, lo_dst := alloc_any_wide();
-        log_verbose("Move wide: % % -> % %", hi_s, lo_s, hi_dst, lo_dst);
         move_wide(hi_s, lo_s, hi_dst, lo_dst);
     } else {
         if is_empty(to_slot(register)) then return;
@@ -257,13 +268,34 @@ copy :: (from: Slot, to: Slot) {
     }
 }
 
+in_stack :: (slot: Slot) -> bool {
+    return slot >= .STACK_00;
+}
+
 move_wide :: (from_hi: Slot, from_lo : Slot, to_hi: Slot, to_lo: Slot) {
     using context.current_procedure;
-    if from_hi == .H && from_lo == .L && to_hi >= .STACK_00 && to_lo >= .STACK_00 {
+    log_verbose("Move wide : % % -> % % (stack : %)", from_hi, from_lo, to_hi, to_lo, stack_size);
+    assert(!(in_stack(from_lo) && in_stack(from_hi) && in_stack(to_hi) && in_stack(to_lo)));
+    if to_hi == Slot.STACK_00 + cast(Slot)stack_size && to_lo == to_hi + 1 { // Pushing
         assert(to_hi + 1 == to_lo);
-        push_hl();
-    } else if from_hi == .STACK_00 && from_lo == .STACK_01 && to_hi == .H && to_lo == .L {
-        pop_hl();
+
+        if from_hi == .H && from_lo == .L {
+            push_hl();
+        } else if from_hi == .B && from_lo == .C {
+            push_bc();
+        } else {
+            assert(false);
+        }
+    } else if stack_size > 0 && from_lo == Slot.STACK_00 + cast(Slot)(stack_size - 1) && from_lo == from_hi + 1 {
+        if to_hi == .H && to_lo == .L {
+            pop_hl();
+        } else if to_hi == .B && to_lo == .C {
+            pop_bc();
+        } else if to_hi == .D && to_lo == .E {
+            pop_de();
+        } else {
+            assert(false);
+        }
     } else {
         move(from_hi, to_hi);
         move(from_lo, to_lo);
@@ -356,7 +388,7 @@ find_wide :: (member: string) -> bool, hi: Slot, lo: Slot {
 }
 
 split_wide_slot :: (register: Register) -> hi: Slot, lo: Slot {
-    hi, lo:= split_register(register);
+    hi, lo := split_register(register);
     return to_slot(hi), to_slot(lo);
 }
 
@@ -474,21 +506,33 @@ copy_slots :: () -> Slot_Table {
 compare_slots :: (other: Slot_Table) -> bool {
     using context.current_procedure;
     for slots {
+        if it.member == "" then continue;
         if it != other[it_index] then return false;
     }
     return true;
 }
 
 reconcile_slots :: (original: Slot_Table) {
+    log_verbose("Begin reconciliation");
     using context.current_procedure;
     max_iters := 20;
     while !compare_slots(original) {
+        log_verbose("CURRENT");
+        print_slot_table(slots);
+        log_verbose("ORIGINAL");
+        print_slot_table(original);
         for slots {
+            if it.member == "" then continue;
             if it != original[it_index] {
                 initial := find_equivalent_occupant_in(original, it);
                 log_verbose("Reconciling % (% to %)", it.member, it_index.(Slot), initial.(Slot));
-                force_empty(to_register(initial));
+                if !is_empty(initial) {
+                    temp := alloc_stack();
+                    move(initial, temp);
+                }
                 move(xx it_index, initial);
+                log_verbose("Reconciled % to %", it.member, it_index.(Slot));
+                break;
             }
         }
         max_iters -= 1;
@@ -524,6 +568,7 @@ pop :: (hi: Slot, lo: Slot) {
     stack_size -= 1;
     slots[hi] = slots[Slot.STACK_00.(int) + stack_size];
     slots[Slot.STACK_00.(int) + stack_size] = Occupant.{};
+    assert(stack_size >= 0);
 }
 
 push_bc :: () {
@@ -545,4 +590,15 @@ pop_hl :: () {
     output_bytes(.POP_HL);
     pop(.H, .L);
 }
+
+pop_bc :: () {
+    output_bytes(.POP_BC);
+    pop(.B, .C);
+}
+
+pop_de :: () {
+    output_bytes(.POP_DE);
+    pop(.D, .E);
+}
+
 

@@ -89,6 +89,13 @@ gather :: (msg: *Message_Typechecked, procedures: *[..]*Code_Procedure_Header, c
                                 array_add(constants, .{ decl.name, 0, data });
 
                             }
+                            case .STRING; {
+                                value := lit._string;
+                                log_verbose(tprint("Added constant %", decl.name));
+                                array_add(constants, .{ decl.name, 0, xx lit._string });
+
+
+                            }
                             case; {
                                 fatal(tprint("Unhandled constant literal: %", lit.value_type));
                                 return false;
@@ -188,11 +195,14 @@ disassemble_procedure :: (builder: *String_Builder, proc: Compiled_Procedure) {
 }
 
 generate_procedure :: (proc: *Code_Procedure_Header) -> Compiled_Procedure {
-    log_verbose("==== Compiling %", proc.name);
+    log_verbose("====\nCompiling %\n====", proc.name);
     result: Compiled_Procedure;
     result.procedure_header = proc;
     assert(proc.body_or_null != null, "Procedure didn't compile?");
     body := proc.body_or_null;
+    if proc.name != "main" {
+        procedure_header(,, current_procedure = *result);
+    }
     compile_block(,, current_procedure = *result, current_node = body.block);
     if result.errors.count > 0 {
         return result;
@@ -201,6 +211,7 @@ generate_procedure :: (proc: *Code_Procedure_Header) -> Compiled_Procedure {
     if proc.name == "main" {
         output_bytes(.HALT,, current_procedure = *result);
     } else if !result.return_added {
+        procedure_footer(,, current_procedure = *result);
         output_bytes(.RET,, current_procedure = *result);
     }
 
@@ -345,6 +356,7 @@ compile_statement :: () {
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
             op : Operator_Type = xx bin_op.operator_type;
+            log_verbose("Operator: %", operator_to_string2(op));
             ok, left, pointer_to := rvalue(bin_op.left);
             if !ok then return;
             defer {
@@ -375,12 +387,18 @@ compile_statement :: () {
                         }
                     }
 
-                    temp := push_temporary();
-                    defer pop_temporary(temp);
-                    compile_expression(*temp,, current_node = bin_op.right);
+                    // Try to get the += 1;
+                    if op == .PLUS_ASSIGN && is_literal_1(bin_op.right) {
+                        loc := member_location(left);
+                        increment(loc);
+                    } else {
+                        temp := push_temporary();
+                        defer pop_temporary(temp);
+                        compile_expression(*temp,, current_node = bin_op.right);
 
-                    arithmetic_instruction(get_instruction(op), left, temp);
-                    set_member_location(left, .A);
+                        arithmetic_instruction(get_instruction(op), left, temp);
+                        set_member_location(left, .A);
+                    }
                 }
                 case; {
                     error(tprint("Unhandled binary operator statement %", operator_to_string2(xx op)));
@@ -406,6 +424,7 @@ compile_statement :: () {
                 compile_expression(*temp,, current_node = ret.arguments_sorted[0]);
                 move_member(temp, .A);
             }
+            procedure_footer();
             output_bytes(.RET);
             context.current_procedure.return_added = true;
         }
@@ -512,14 +531,16 @@ compile_expression :: (target_member: *string) {
                         type_member(target_member.*, type);
                     }
                     reg := ensure_member_in_register(target_member.*);
-                    if type == {
+                    t := get_member_type(target_member.*);
+                    if t == {
                         case .U8; {
                             load_imm8(reg, lit._u64.(u8));
                         }
+                        case .POINTER; #through;
                         case .U16; {
                             load_imm16(reg, lit._u64.(u16));
                         }
-                        case; assert(false);
+                        case; assert(false, "loading litteral to %", t);
 
                     }
                     return;
@@ -541,6 +562,7 @@ compile_expression :: (target_member: *string) {
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
             op : Operator_Type = xx bin_op.operator_type;
+            log_verbose("Operator: '%'", operator_to_string2(op));
 
             instr: Arithmetic_Instruction;
             if op == {
@@ -555,8 +577,12 @@ compile_expression :: (target_member: *string) {
                     assert(bin_op.left.kind == .IDENT);
 
                     force_empty(.HL);
+                    base_address := push_temporary();
+                    defer pop_temporary(base_address);
+
                     ident := bin_op.left.(*Code_Ident);
                     assert((ident.resolved_declaration.flags & .IS_CONSTANT) != 0, "Array subscript isn't constant: %", ident.resolved_declaration.*);
+                    set_member_location(base_address, .HL);
                     load_imm16(.HL, get_constant_address(ident.name));
                     force_empty(.BC);
                     move_member(bin_op.right.(*Code_Ident).name, .BC);
@@ -579,10 +605,15 @@ compile_expression :: (target_member: *string) {
 
             right := push_temporary();
             defer pop_temporary(right);
+            log_verbose("RIGHT EXPRESSION : %", operator_to_string2(op));
             compile_expression(*right,, current_node = bin_op.right);
             left := push_temporary();
             defer pop_temporary(left);
+            log_verbose("LEFT EXPRESSION : %", operator_to_string2(op));
             compile_expression(*left,, current_node = bin_op.left); 
+
+            assert(get_member_type(left) != .NONE, "Left member is untyped");
+            assert(get_member_type(right) != .NONE, "Right member (%) is untyped", right);
 
 
             if (is_wide(left) || is_wide(right)) && instr == .SUB {
@@ -613,7 +644,9 @@ compile_expression :: (target_member: *string) {
                 pop_temporary(target_member.*);
                 target_member.* = ident.name;
             } else {
-                type_member(target_member.*, get_member_type(ident.name));
+                if get_member_type(target_member.*) == .NONE {
+                    type_member(target_member.*, get_member_type(ident.name));
+                }
                 l := ensure_member_in_register(target_member.*);
                 copy_member_to(ident.name, l);
             }
@@ -640,12 +673,13 @@ compile_expression :: (target_member: *string) {
         }
         case .CAST; {
             cst := node.(*Code_Cast);
-            if (cst.cast_flags & ~(.IS_AUTO)) != 0 {
+            if (cst.cast_flags & ~(.IS_AUTO | .IS_IMPLICIT)) != 0 {
                 error(tprint("Unhandled cast: %", cst.cast_flags));
                 return;
             }
-            if cst.cast_flags & .IS_AUTO {
+            if cst.cast_flags & .IS_AUTO || cst.cast_flags & .IS_IMPLICIT {
                 // Just use the type of the target_member
+                log_verbose("Cast, current type: %", get_member_type(target_member.*));
                 compile_expression(target_member,, current_node = cst.expression);
                 return;
             } else {
@@ -669,6 +703,7 @@ compile_condition :: () -> [..]int {
         case .BINARY_OPERATOR; {
             bin_op := node.(*Code_Binary_Operator);
             op : Operator_Type = xx bin_op.operator_type;
+            log_verbose("Operator: '%'", operator_to_string2(op));
             right := push_temporary();
             defer pop_temporary(right);
 
@@ -710,9 +745,12 @@ compile_condition :: () -> [..]int {
                             array_add(*jumps, begin_jump(.ALWAYS));
                             return jumps;
                         }
-                        arithmetic_instruction(.CP, lo_l, lo_r);
+                        force_empty(.A);
+                        load_instruction(.A, lo_l);
+                        arithmetic_instruction(.CP, .A, lo_r);
                         array_add(*jumps, begin_jump(.IF_NON_ZERO));
-                        arithmetic_instruction(.CP, hi_l, hi_r);
+                        load_instruction(.A, hi_l);
+                        arithmetic_instruction(.CP, .A, hi_r);
                         array_add(*jumps, begin_jump(.IF_NON_ZERO));
                     } 
                     case .IS_NOT_EQUAL; {
@@ -720,10 +758,14 @@ compile_condition :: () -> [..]int {
                             // They are always non equal
                             return jumps;
                         }
-                        arithmetic_instruction(.CP, lo_l, lo_r);
+                        force_empty(.A);
+                        load_instruction(.A, lo_l);
+                        arithmetic_instruction(.CP, .A, lo_r);
+                        lo_neq := begin_jump(.IF_NON_ZERO);
+                        load_instruction(.A, hi_l);
+                        arithmetic_instruction(.CP, .A, hi_r);
                         array_add(*jumps, begin_jump(.IF_ZERO));
-                        arithmetic_instruction(.CP, hi_l, hi_r);
-                        array_add(*jumps, begin_jump(.IF_ZERO));
+                        end_jump(lo_neq);
                     }
                     // @TODO
                     // case .LESS_OR_EQUAL; {
@@ -739,6 +781,19 @@ compile_condition :: () -> [..]int {
                     //     arithmetic_instruction(.SBC, .A, hi_r);
                     //     array_add(*jumps, begin_jump(.IF_NON_ZERO));
                     // }
+                    case #char "<"; {
+                        // Check the highs first and if they're equal
+                        // compare the lows
+                        force_empty(.A);
+                        load_instruction(.A, hi_l);
+                        arithmetic_instruction(.CP, .A, hi_r);
+                        hi_inferior := begin_jump(.IF_CARRY); // Highs are < jump to block directly
+                        array_add(*jumps, begin_jump(.IF_NON_ZERO)); // highs are non equal, jump to end
+                        load_instruction(.A, lo_l);
+                        arithmetic_instruction(.CP, .A, lo_r);
+                        array_add(*jumps, begin_jump(.IF_NON_CARRY)); // lows are equal, jump to end
+                        end_jump(hi_inferior);
+                    }
                     case; {
                         error(tprint("Unhandled wide binary operator comparison '%'", operator_to_string2(op))); 
                         return jumps;
@@ -769,7 +824,10 @@ compile_condition :: () -> [..]int {
 
 operator_to_string2 :: (op: Operator_Type) -> string #expand {
     if op < 127 {
-        return to_string(*op.(u8));
+        s : string;
+        s.data = xx *op;
+        s.count = 1;
+        return s;
     } else {
         return operator_to_string(op);
     }
@@ -821,6 +879,22 @@ load_imm16 :: (dst: Register, val: u16) {
     }
 
     output_bytes(instr, (val & 0xFF).(u8), ((val >> 8) & 0xFF).(u8));
+}
+
+increment :: (register: Register) {
+    if register == {
+        case .A;    output_bytes(.INC_A);
+        case .B;    output_bytes(.INC_B);
+        case .C;    output_bytes(.INC_C);
+        case .D;    output_bytes(.INC_D);
+        case .E;    output_bytes(.INC_E);
+        case .H;    output_bytes(.INC_H);
+        case .L;    output_bytes(.INC_L);
+        case .BC;   output_bytes(.INC_BC);
+        case .DE;   output_bytes(.INC_DE);
+        case .HL;   output_bytes(.INC_HL);
+        case; assert(false);
+    }
 }
 
 Arithmetic_Instruction :: enum u8 {
@@ -901,12 +975,14 @@ dot_operator :: (target_member: string, left: *Code_Ident, right: *Code_Ident) {
                 case "count"; {
                     if ti_arr.array_count > -1 {
                         if ti_arr.array_count > 0xFF {
-                            error("Wide arrays aren't supported yet");
-                            return;
+                            type_member(target_member, .U16);
+                            reg := ensure_member_in_register(target_member);
+                            load_imm16(reg, xx ti_arr.array_count);
+                        } else {
+                            type_member(target_member, .U8);
+                            reg := ensure_member_in_register(target_member);
+                            load_imm8(reg, xx ti_arr.array_count);
                         }
-                        type_member(target_member, .U8);
-                        reg := ensure_member_in_register(target_member);
-                        load_imm8(reg, xx ti_arr.array_count);
                         return;
                     } else {
                         error(tprint("Runtime arrays aren't supported yet"));
@@ -925,9 +1001,18 @@ dot_operator :: (target_member: string, left: *Code_Ident, right: *Code_Ident) {
 }
 
 arithmetic_instruction :: (kind: Arithmetic_Instruction, left: Register, right: Register) {
+    assert(left == .A || right == .A, "Outputting arithmetic_instruction without a");
     src := ifx left == .A then right else left;
     tgt := to_opcode(src);
     output_bytes(kind.(u8) + tgt.(u8));
+}
+
+is_literal_1 :: (code: *Code_Node) -> bool {
+    if code.kind != .LITERAL then return false;
+    lit := code.(* Code_Literal);
+
+    if lit.value_type != .NUMBER then return false;
+    return lit._u64 == 1;
 }
 
 Operation_Target :: enum {
@@ -1015,19 +1100,33 @@ Instruction_Kind :: enum u8 {
     LD_A_IMM :: 0x3E;
     HALT :: 0x76;
     XOR_A :: 0xAF;
-    PUSH_BC :: 0xC5;
     RET :: 0xC9;
     CALL :: 0xCD;
-    PUSH_DE :: 0xD5;
     RETI :: 0xD9;
     ADD_SP_S8 :: 0xE8;
-    PUSH_HL :: 0xE5;
     DI :: 0xF3;
+    PUSH_BC :: 0xC5;
+    PUSH_DE :: 0xD5;
+    PUSH_HL :: 0xE5;
     PUSH_AF :: 0xF5;
     LD_HL_SP_PLUS_S8 :: 0xF8;
     EI :: 0xFB;
     CP_D8 :: 0xFE;
+    POP_BC :: 0xC1;
+    POP_DE :: 0xD1;
     POP_HL :: 0xE1;
+
+    INC_B :: 0x04;
+    INC_C :: 0x0C;
+    INC_D :: 0x14;
+    INC_E :: 0x1C;
+    INC_H :: 0x24;
+    INC_L :: 0x2C;
+    INC_A :: 0x3C;
+
+    INC_BC :: 0x03;
+    INC_DE :: 0x13;
+    INC_HL :: 0x23;
 }
 
 Cart_Header :: struct {
